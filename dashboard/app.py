@@ -94,6 +94,7 @@ from agents.valuation_agent import ValuationAgent
 from agents.deal_hunter_agent import DealHunterAgent
 from agents.news_intel_agent import NewsIntelAgent
 from agents.insurance_agent import InsuranceAgent
+from agents.mortgage_agent import MortgageAgent, BANK_RATES, SORA_3M
 from core.llm_router import save_mode, get_current_mode, get_token_summary
 from data.news_pipeline import get_sentiment_index
 
@@ -101,8 +102,83 @@ st.set_page_config(
     page_title="PropertyOS",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",  # collapsed by default on mobile
 )
+
+# ── Mobile-responsive CSS ─────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Base layout ── */
+.block-container { padding: 1rem 1rem 2rem !important; max-width: 1200px; }
+
+/* ── Sidebar: full-width drawer on small screens ── */
+@media (max-width: 768px) {
+    .block-container { padding: 0.5rem 0.5rem 4rem !important; }
+
+    /* Stack metric cards vertically */
+    [data-testid="stMetric"] { min-width: 120px; }
+    [data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
+
+    /* Make tabs scrollable horizontally */
+    [data-testid="stTabs"] > div:first-child {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    [data-testid="stTabs"] button { white-space: nowrap; font-size: 0.75rem; padding: 0.3rem 0.5rem; }
+
+    /* Full-width inputs */
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stSelectbox"] { width: 100% !important; }
+
+    /* Buttons full width on mobile */
+    [data-testid="stButton"] > button { width: 100%; margin-bottom: 0.5rem; }
+
+    /* Heatmap tables — horizontal scroll */
+    div[style*="overflow-x:auto"] { font-size: 11px !important; }
+    div[style*="overflow-x:auto"] td, div[style*="overflow-x:auto"] th {
+        padding: 3px 5px !important;
+        font-size: 11px !important;
+    }
+
+    /* Charts don't overflow */
+    [data-testid="stArrowVegaLiteChart"] { overflow-x: auto; }
+
+    /* Hide decorative elements to save space */
+    .stDecoration { display: none; }
+
+    /* Sidebar toggle button — always visible */
+    [data-testid="collapsedControl"] { display: block !important; }
+}
+
+/* ── Tablet (768–1024px) ── */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .block-container { padding: 1rem 1.5rem !important; }
+    [data-testid="stTabs"] button { font-size: 0.8rem; }
+}
+
+/* ── Metric cards: wrap on small screens ── */
+[data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* ── Gradient heatmap tables: always scrollable ── */
+div[style*="overflow-x:auto"] {
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+}
+
+/* ── Bottom navigation bar on mobile (replaces sidebar) ── */
+@media (max-width: 768px) {
+    /* Sticky bottom bar hint */
+    footer { display: none; }
+    #MainMenu { display: none; }
+    header { display: none; }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -116,7 +192,7 @@ with st.sidebar:
     st.divider()
     tab_select = st.radio(
         "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "⚙️ Admin"],
+        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "⚙️ Admin"],
     )
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
@@ -1167,6 +1243,229 @@ elif tab_select == "🛡️ Insurance":
                                         st.write(f"⚠️ **{gap['gap']}** ({gap['priority']}) — {gap['reason']}")
         except Exception as e:
             st.warning(f"Could not load profiles: {e}")
+
+# ── Mortgage ──────────────────────────────────────────────────────────────────
+elif tab_select == "🏦 Mortgage":
+    st.header("🏦 Mortgage Calculator & Refi Advisor")
+    st.caption(f"Current SORA 3M: **{SORA_3M}%** · Rates updated June 2026")
+
+    agent = MortgageAgent()
+
+    mort_tab1, mort_tab2, mort_tab3, mort_tab4 = st.tabs([
+        "📐 Loan Calculator", "🏦 Bank Comparison", "♻️ Refi Analysis", "🏛️ Affordability Check"
+    ])
+
+    # ── Tab 1: Loan Calculator ─────────────────────────────────────────────────
+    with mort_tab1:
+        st.subheader("Monthly Repayment Calculator")
+        c1, c2 = st.columns(2)
+        prop_price = c1.number_input("Property Price (SGD)", value=650000, step=10000, min_value=100000)
+        ltv_pct = c1.slider("Loan-to-Value %", 50, 80, 75, help="HDB: up to 80% (bank loan), Private: up to 75%")
+        tenure = c2.slider("Loan Tenure (years)", 5, 30, 25)
+        rate = c2.number_input("Interest Rate (% p.a.)", value=3.68, step=0.05, min_value=1.0, max_value=8.0)
+        cpf_monthly = c2.number_input("Monthly CPF OA contribution (SGD)", value=800, step=100, min_value=0)
+
+        loan = prop_price * ltv_pct / 100
+        cash_down = prop_price - loan
+
+        if st.button("Calculate", type="primary", key="mort_calc"):
+            result = agent.calculate(prop_price, loan, tenure, rate, cpf_monthly)
+            st.divider()
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Monthly Repayment", f"SGD {result['monthly_repayment']:,.0f}")
+            m2.metric("Cash Down Payment", f"SGD {cash_down:,.0f}")
+            m3.metric("Total Interest Paid", f"SGD {result['total_interest']:,.0f}")
+            m4.metric("Interest / Loan", f"{result['interest_to_loan_ratio']}%")
+
+            st.divider()
+            c3, c4 = st.columns(2)
+            c3.metric("CPF covers", f"{result['cpf_covers_pct']}%")
+            c4.metric("Monthly cash top-up needed", f"SGD {result['monthly_cash_top_up']:,.0f}")
+
+            # Amortisation highlights
+            with st.expander("Amortisation breakdown"):
+                import pandas as _pd
+                r = rate / 100 / 12
+                rows = []
+                bal = loan
+                for yr in [1, 3, 5, 10, 15, 20, int(tenure)]:
+                    n = yr * 12
+                    if n > tenure * 12:
+                        break
+                    # Principal paid by year n
+                    if r > 0:
+                        bal_remaining = loan * (1 + r)**n - result['monthly_repayment'] * ((1 + r)**n - 1) / r
+                    else:
+                        bal_remaining = loan - result['monthly_repayment'] * n
+                    bal_remaining = max(0, bal_remaining)
+                    principal_paid = loan - bal_remaining
+                    rows.append({"Year": yr, "Balance Remaining (SGD)": f"{bal_remaining:,.0f}",
+                                 "Principal Paid (SGD)": f"{principal_paid:,.0f}",
+                                 "% Paid Off": f"{principal_paid/loan*100:.1f}%"})
+                st.dataframe(_pd.DataFrame(rows).set_index("Year"), use_container_width=True)
+
+    # ── Tab 2: Bank Comparison ─────────────────────────────────────────────────
+    with mort_tab2:
+        st.subheader("Bank Rate Comparison")
+        import pandas as _pd
+
+        bc1, bc2, bc3 = st.columns(3)
+        bc_loan = bc1.number_input("Loan Amount (SGD)", value=487500, step=10000, min_value=100000, key="bc_loan")
+        bc_tenure = bc2.slider("Tenure (years)", 5, 30, 25, key="bc_ten")
+        bc_hdb = bc3.checkbox("HDB flat? (includes HDB loan option)", value=True, key="bc_hdb")
+        bc_type = bc3.radio("Rate type", ["fixed", "floating"], key="bc_rtype", horizontal=True)
+
+        results = agent.compare_banks(bc_loan, bc_tenure, bc_type, bc_hdb)
+
+        rows = []
+        for r in results:
+            rows.append({
+                "Bank": r["bank"],
+                "Package": r["rate_name"],
+                "Rate %": r["annual_rate_pct"],
+                "Monthly (SGD)": f"{r['monthly_repayment']:,.0f}",
+                "Total Interest (SGD)": f"{r['total_interest_sgd']:,.0f}",
+                "Lock-in (yrs)": r["lock_in_years"],
+                "Cashback (SGD)": r["cashback_sgd"],
+                "Legal Subsidy": r["legal_subsidy_sgd"],
+                "Net 1st-Yr Cost": f"{r['net_first_year_cost']:,.0f}",
+            })
+
+        df_banks = _pd.DataFrame(rows)
+        if not df_banks.empty:
+            st.dataframe(df_banks.set_index("Bank"), use_container_width=True)
+            st.caption("Net 1st-Year Cost = (monthly × 12) − cashback − legal subsidy. Lower = cheaper to switch to.")
+
+            best = results[0]
+            st.success(f"**Best deal:** {best['bank']} — {best['rate_name']} at **{best['annual_rate_pct']}%** "
+                       f"(SGD {best['monthly_repayment']:,.0f}/mo). Net first-year cost after incentives: SGD {best['net_first_year_cost']:,.0f}.")
+
+        # Detailed rate schedules
+        with st.expander("All rate schedules"):
+            for r in results:
+                st.markdown(f"**{r['bank']}**")
+                for pkg in r["all_rates"]:
+                    st.markdown(f"  · Year {pkg['year']}: {pkg['name']} — **{pkg['rate']:.2f}%**")
+                if r["note"]:
+                    st.info(r["note"])
+
+    # ── Tab 3: Refi Analysis ───────────────────────────────────────────────────
+    with mort_tab3:
+        st.subheader("Refinancing Savings Calculator")
+        st.info("Find out if switching banks saves money — and by how much.")
+
+        rc1, rc2, rc3 = st.columns(3)
+        cur_rate = rc1.number_input("Your current rate (% p.a.)", value=4.20, step=0.05, min_value=1.0, max_value=8.0, key="cur_rate")
+        cur_outstanding = rc2.number_input("Outstanding loan (SGD)", value=450000, step=10000, min_value=50000, key="cur_out")
+        rem_tenure = rc3.slider("Remaining tenure (years)", 1, 30, 20, key="rem_ten")
+        cur_bank = rc1.text_input("Current bank", value="DBS", key="cur_bank")
+
+        if st.button("Analyse Refi Savings", type="primary", key="refi_btn"):
+            with st.spinner("Comparing rates..."):
+                refi = agent.refi_analysis(cur_rate, cur_outstanding, rem_tenure, cur_bank)
+
+            best = refi["best_refi"]
+            if best:
+                verdict_color = "success" if best["worth_refi"] else "warning"
+                getattr(st, verdict_color)(f"**{refi['recommendation']}**")
+
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("Current Monthly", f"SGD {refi['current_monthly']:,.0f}")
+                r2.metric("Best New Monthly", f"SGD {best['new_monthly']:,.0f}", delta=f"-SGD {best['monthly_saving']:,.0f}/mo")
+                r3.metric("Annual Saving", f"SGD {best['annual_saving']:,.0f}")
+                r4.metric("Breakeven Period", f"{best['breakeven_months']} months")
+
+                import pandas as _pd
+                rows = []
+                for opt in refi["all_options"]:
+                    rows.append({
+                        "Bank": opt["bank"],
+                        "New Rate %": opt["new_rate_pct"],
+                        "Monthly (SGD)": f"{opt['new_monthly']:,.0f}",
+                        "Monthly Saving": f"{opt['monthly_saving']:,.0f}",
+                        "Annual Saving": f"{opt['annual_saving']:,.0f}",
+                        "Switching Cost": f"{opt['switching_cost_sgd']:,.0f}",
+                        "Breakeven (mo)": opt["breakeven_months"],
+                        "Net Saving": f"{opt['net_saving_over_tenure']:,.0f}",
+                        "Worth It?": "✅" if opt["worth_refi"] else "⏳",
+                    })
+                if rows:
+                    st.dataframe(_pd.DataFrame(rows).set_index("Bank"), use_container_width=True)
+
+                # MRTA alert
+                if "insurance_alert" in refi:
+                    alert = refi["insurance_alert"]
+                    st.warning(f"🛡️ **MRTA Review Recommended**\n\n{alert['message']}")
+                    if st.button("💬 Get MRTA Quote", key="mrta_from_refi"):
+                        st.switch_page = None  # navigation placeholder
+                        st.info("Head to the 🛡️ Insurance tab to run a full MRTA analysis for your new loan.")
+
+                # AI narrative
+                if "narrative" in refi:
+                    with st.expander("🤖 AI Refi Commentary"):
+                        st.write(refi["narrative"])
+            else:
+                st.info("Your current rate is already competitive — no significant savings from refinancing now.")
+                st.caption(refi["recommendation"])
+
+    # ── Tab 4: Affordability Check ─────────────────────────────────────────────
+    with mort_tab4:
+        st.subheader("TDSR / MSR Affordability Check")
+        st.caption("MAS guidelines: TDSR ≤ 55% (all loans), MSR ≤ 30% for HDB/EC loans.")
+
+        ac1, ac2 = st.columns(2)
+        gross_income = ac1.number_input("Gross monthly income (SGD)", value=8000, step=500, min_value=1000, key="gross_inc")
+        aff_loan = ac1.number_input("Loan amount (SGD)", value=487500, step=10000, min_value=50000, key="aff_loan")
+        aff_tenure = ac1.slider("Tenure (years)", 5, 30, 25, key="aff_ten")
+        aff_rate = ac1.number_input("Interest rate (% p.a.)", value=3.68, step=0.05, min_value=1.0, key="aff_rate")
+        other_debts = ac2.number_input("Other monthly debt payments (car loan, study loan, etc.) SGD", value=0, step=100, min_value=0, key="other_debts")
+        aff_hdb = ac2.checkbox("HDB flat? (applies MSR limit)", value=True, key="aff_hdb")
+        aff_age = ac2.slider("Your age", 21, 65, 35, key="aff_age")
+        cpf_oa = ac2.number_input("Monthly CPF OA contribution (SGD)", value=800, step=100, min_value=0, key="cpf_oa")
+
+        if st.button("Check Affordability", type="primary", key="aff_btn"):
+            aff = agent.affordability_check(gross_income, aff_loan, aff_tenure, aff_rate, other_debts, aff_hdb)
+
+            # Verdict
+            if "✅" in aff["verdict"]:
+                st.success(aff["verdict"])
+            else:
+                st.error(aff["verdict"])
+
+            a1, a2, a3 = st.columns(3)
+            a1.metric("Monthly Repayment", f"SGD {aff['monthly_repayment']:,.0f}")
+            a2.metric("TDSR", f"{aff['tdsr_pct']}%", delta=f"Limit: {aff['tdsr_limit_pct']}%",
+                      delta_color="off" if aff["tdsr_pass"] else "inverse")
+            if aff_hdb:
+                a3.metric("MSR", f"{aff['msr_pct']}%", delta=f"Limit: {aff['msr_limit_pct']}%",
+                          delta_color="off" if aff["msr_pass"] else "inverse")
+
+            st.info(f"💡 {aff['tip']}")
+
+            # CPF projection
+            st.divider()
+            st.markdown("**CPF OA Projection**")
+            cpf = agent.cpf_projection(aff_loan / 0.75, aff_loan, aff_tenure, aff_rate, cpf_oa, aff_age)
+            cp1, cp2, cp3 = st.columns(3)
+            cp1.metric("Monthly CPF used", f"SGD {cpf['monthly_cpf_used']:,.0f}")
+            cp2.metric("Monthly cash needed", f"SGD {cpf['monthly_cash_needed']:,.0f}")
+            cp3.metric("Total CPF over tenure", f"SGD {cpf['total_cpf_used']:,.0f}")
+            if cpf["warning"]:
+                st.warning(f"⚠️ {cpf['warning']}")
+            elif cpf["within_cpf_limit"]:
+                st.success("✅ CPF usage within valuation limit for entire tenure.")
+
+            # MRTA nudge for new buyers
+            st.divider()
+            st.markdown("### 🛡️ Protect Your Mortgage")
+            st.markdown(
+                f"On a SGD {aff_loan:,.0f} loan over {aff_tenure} years, "
+                f"an MRTA policy typically costs **SGD 2,000–5,000** as a one-time premium "
+                f"and pays off your outstanding mortgage if you pass away or become critically ill. "
+                f"Your family keeps the home — not just the debt."
+            )
+            if st.button("💬 Run MRTA Analysis", key="mrta_from_aff"):
+                st.info("Head to the 🛡️ Insurance tab → Analyse to build your full insurance portfolio including MRTA/MLTA coverage.")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
