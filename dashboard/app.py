@@ -101,10 +101,26 @@ from core.llm_router import save_mode, get_current_mode, get_token_summary
 from data.news_pipeline import get_sentiment_index
 
 st.set_page_config(
-    page_title="PropertyOS",
+    page_title="PropOS — Singapore Property Intelligence",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed",  # collapsed by default on mobile
+    initial_sidebar_state="collapsed",
+    menu_items={
+        "Get Help": "https://t.me/AcePropOs_Ch",
+        "Report a bug": "mailto:mailtsjp@gmail.com",
+        "About": (
+            "## PropOS — Singapore Property Intelligence\n\n"
+            "AI-powered HDB & private property platform for Singapore.\n\n"
+            "**Features:** Address lookup · Deal scanner · Valuation · "
+            "News intelligence · Insurance advisor · Mortgage calculator · "
+            "BTO tracker · Price alerts\n\n"
+            "**Contact:** mailtsjp@gmail.com\n\n"
+            "**Telegram channel:** https://t.me/AcePropOs_Ch\n\n"
+            "**Telegram bot:** @askAceBot\n\n"
+            "_Data sources: HDB Resale (data.gov.sg), URA (ura.gov.sg), "
+            "RSS news feeds. Not financial advice._"
+        ),
+    },
 )
 
 # ── Mobile-responsive CSS ─────────────────────────────────────────────────────

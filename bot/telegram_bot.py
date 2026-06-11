@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
 from agents.deal_hunter_agent import DealHunterAgent
@@ -30,8 +30,11 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("propos_bot")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-ADMIN_CHAT_ID = int(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "0"))
-DEALS_CHANNEL_ID = os.environ.get("TELEGRAM_DEALS_CHANNEL_ID", "")
+ADMIN_CHAT_ID = int(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "1245366658"))
+DEALS_CHANNEL_ID = os.environ.get("TELEGRAM_DEALS_CHANNEL_ID", "-1004221326153")
+
+def is_admin(update: Update) -> bool:
+    return update.effective_user.id == ADMIN_CHAT_ID
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -223,6 +226,173 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 
+# ── Admin commands ────────────────────────────────────────────────────────────
+
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin-only menu. Only responds to ADMIN_CHAT_ID."""
+    if not is_admin(update):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("📊 System Status", callback_data="admin_status"),
+         InlineKeyboardButton("💰 Token Costs", callback_data="admin_costs")],
+        [InlineKeyboardButton("📰 Sync News Now", callback_data="admin_sync_news"),
+         InlineKeyboardButton("🏠 Sync HDB Now", callback_data="admin_sync_hdb")],
+        [InlineKeyboardButton("📢 Post Daily Digest", callback_data="admin_post_digest"),
+         InlineKeyboardButton("🔍 Run Watchlist Check", callback_data="admin_watchlist")],
+        [InlineKeyboardButton("🔄 Check Bot Health", callback_data="admin_health")],
+    ]
+    await update.message.reply_text(
+        "🔐 *Admin Menu* — @askAceBot",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def admin_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle inline keyboard callbacks from admin menu."""
+    query = update.callback_query
+    if query.from_user.id != ADMIN_CHAT_ID:
+        await query.answer("⛔ Admin only.")
+        return
+    await query.answer()
+
+    data = query.data
+
+    if data == "admin_status":
+        from core.llm_router import get_current_mode, get_token_summary
+        mode = get_current_mode()
+        costs = get_token_summary()
+        sentiment = get_sentiment_index()
+        msg = (
+            f"⚙️ *System Status*\n\n"
+            f"🤖 LLM Mode: `{mode['mode'].upper()}` ({mode['model']})\n"
+            f"💰 API Cost: SGD ${costs['est_sgd']:.4f} ({costs['call_count']} calls)\n"
+            f"📊 Market Sentiment: {sentiment.get('label', 'N/A')} ({sentiment.get('score', 0):.2f})\n"
+            f"📡 Dashboard: https://acepropos.duckdns.org"
+        )
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    elif data == "admin_costs":
+        from core.llm_router import get_token_summary
+        costs = get_token_summary()
+        lines = [f"💰 *Token Usage Summary*\n"]
+        for model, stats in costs.get("by_model", {}).items():
+            lines.append(f"• `{model}`: {stats.get('calls',0)} calls, SGD ${stats.get('cost_sgd',0):.4f}")
+        lines.append(f"\n**Total: SGD ${costs['est_sgd']:.4f}**")
+        await query.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+    elif data == "admin_sync_news":
+        await query.edit_message_text("🔄 Syncing news... (check logs)")
+        try:
+            from data.news_pipeline import sync_news
+            sync_news()
+            await ctx.bot.send_message(ADMIN_CHAT_ID, "✅ News sync complete.")
+        except Exception as e:
+            await ctx.bot.send_message(ADMIN_CHAT_ID, f"❌ News sync failed: {e}")
+
+    elif data == "admin_sync_hdb":
+        await query.edit_message_text("🔄 Syncing HDB data... (this may take 30s)")
+        try:
+            from data.hdb_pipeline import fetch_hdb_resale
+            records = fetch_hdb_resale(force=True)
+            await ctx.bot.send_message(ADMIN_CHAT_ID, f"✅ HDB sync done — {len(records)} records.")
+        except Exception as e:
+            await ctx.bot.send_message(ADMIN_CHAT_ID, f"❌ HDB sync failed: {e}")
+
+    elif data == "admin_post_digest":
+        await query.edit_message_text("📢 Posting digest to channel...")
+        try:
+            await post_daily_briefing(ctx.bot)
+            await ctx.bot.send_message(ADMIN_CHAT_ID, "✅ Digest posted to Ace PropOs_Ch.")
+        except Exception as e:
+            await ctx.bot.send_message(ADMIN_CHAT_ID, f"❌ Post failed: {e}")
+
+    elif data == "admin_watchlist":
+        await query.edit_message_text("🔍 Running watchlist check...")
+        try:
+            from data.watchlist import check_watchlist, format_alert_message
+            alerts = check_watchlist()
+            if alerts:
+                await ctx.bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"✅ {len(alerts)} watchlist alert(s) found and queued for sending."
+                )
+                for alert in alerts[:3]:
+                    await ctx.bot.send_message(
+                        ADMIN_CHAT_ID,
+                        format_alert_message(alert),
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+            else:
+                await ctx.bot.send_message(ADMIN_CHAT_ID, "✅ Watchlist checked — no new matches.")
+        except Exception as e:
+            await ctx.bot.send_message(ADMIN_CHAT_ID, f"❌ Watchlist check failed: {e}")
+
+    elif data == "admin_health":
+        import os
+        from pathlib import Path
+        cache_dir = Path(__file__).parent.parent / "cache"
+        hdb_cache = cache_dir / "hdb" / "resale.json"
+        news_cache = cache_dir / "news" / "articles.json"
+
+        hdb_age = "missing"
+        if hdb_cache.exists():
+            import time
+            age_h = (time.time() - hdb_cache.stat().st_mtime) / 3600
+            hdb_age = f"{age_h:.0f}h ago"
+
+        news_age = "missing"
+        if news_cache.exists():
+            import time
+            age_h = (time.time() - news_cache.stat().st_mtime) / 3600
+            news_age = f"{age_h:.0f}h ago"
+
+        msg = (
+            f"🔄 *Bot Health Check*\n\n"
+            f"🏠 HDB cache: {hdb_age}\n"
+            f"📰 News cache: {news_age}\n"
+            f"🤖 Bot: ✅ Online\n"
+            f"📡 Dashboard: https://acepropos.duckdns.org"
+        )
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def handle_enquiry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Forward non-command messages to admin as enquiries.
+    Public users can text the bot; admin sees it and can reply.
+    """
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    text = update.message.text or ""
+
+    # If admin is replying in their own chat, echo for confirmation
+    if chat_id == ADMIN_CHAT_ID:
+        return
+
+    # Forward to admin
+    fwd = (
+        f"📩 *New Enquiry*\n\n"
+        f"From: {user.first_name or ''} {user.last_name or ''} (@{user.username or 'no username'})\n"
+        f"Chat ID: `{chat_id}`\n\n"
+        f"Message:\n{text}\n\n"
+        f"_Reply in the bot chat to respond._"
+    )
+    try:
+        await ctx.bot.send_message(ADMIN_CHAT_ID, fwd, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            "✅ Your message has been forwarded to our team. "
+            "We'll get back to you within 1 business day.\n\n"
+            "Meanwhile, try:\n/hdb — HDB deals\n/news — Market sentiment\n"
+            "📊 https://acepropos.duckdns.org"
+        )
+    except Exception as e:
+        log.error(f"Enquiry forward failed: {e}")
+        await update.message.reply_text("Thanks for reaching out! Email us: mailtsjp@gmail.com")
+
+
 # ── Scheduled: Daily public channel post ──────────────────────────────────────
 
 async def post_daily_briefing(bot: Bot):
@@ -310,6 +480,10 @@ def main():
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("value", cmd_value))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
+    # Forward non-command messages to admin as enquiries
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_enquiry))
 
     log.info("PropertyOS Telegram bot starting...")
     app.run_polling(drop_pending_updates=True)
