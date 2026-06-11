@@ -123,85 +123,226 @@ st.set_page_config(
     },
 )
 
-# ── Mobile-responsive CSS ─────────────────────────────────────────────────────
+# ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* ═══════════════════════════════════════════════════════
+   PROPOS PREMIUM THEME — Dark Navy + Gold
+   ═══════════════════════════════════════════════════════ */
+
+/* Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Global typography ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
 /* ── Base layout ── */
-.block-container { padding: 1rem 1rem 2rem !important; max-width: 1200px; }
+.block-container {
+    padding: 1.5rem 1.5rem 3rem !important;
+    max-width: 1280px;
+}
 
-/* ── Sidebar: full-width drawer on small screens ── */
+/* ── Sidebar: dark navy ── */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1b2a 0%, #1a2f4a 100%) !important;
+    border-right: 1px solid #c9a84c30 !important;
+}
+[data-testid="stSidebar"] * {
+    color: #e8edf2 !important;
+}
+[data-testid="stSidebar"] .stRadio label {
+    color: #b8c8d8 !important;
+    font-size: 0.88rem;
+    padding: 0.25rem 0;
+}
+[data-testid="stSidebar"] .stRadio label:hover {
+    color: #c9a84c !important;
+}
+/* Selected nav item gold */
+[data-testid="stSidebar"] .stRadio [aria-checked="true"] + div {
+    color: #c9a84c !important;
+    font-weight: 600;
+}
+
+/* ── Page headers ── */
+h1 { font-weight: 700 !important; color: #0d1b2a !important; letter-spacing: -0.5px; }
+h2 { font-weight: 600 !important; color: #1a2f4a !important; }
+h3 { font-weight: 600 !important; color: #1a2f4a !important; }
+
+/* ── Metric cards: card shadow + gold label ── */
+[data-testid="stMetric"] {
+    background: #ffffff;
+    border: 1px solid #e8ecf0;
+    border-radius: 12px;
+    padding: 1rem 1.25rem !important;
+    box-shadow: 0 2px 8px rgba(13,27,42,0.06);
+    transition: box-shadow 0.2s;
+}
+[data-testid="stMetric"]:hover {
+    box-shadow: 0 4px 16px rgba(13,27,42,0.12);
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    color: #7a8a9a !important;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    color: #0d1b2a !important;
+}
+
+/* ── Primary buttons: gold ── */
+[data-testid="stButton"] > button[kind="primary"] {
+    background: linear-gradient(135deg, #c9a84c 0%, #e8c96a 100%) !important;
+    color: #0d1b2a !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    padding: 0.55rem 1.5rem !important;
+    box-shadow: 0 2px 8px rgba(201,168,76,0.35) !important;
+    transition: all 0.2s !important;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+    box-shadow: 0 4px 16px rgba(201,168,76,0.55) !important;
+    transform: translateY(-1px);
+}
+
+/* ── Secondary buttons ── */
+[data-testid="stButton"] > button:not([kind="primary"]) {
+    border-radius: 8px !important;
+    border: 1px solid #d0d8e0 !important;
+    font-weight: 500 !important;
+    transition: all 0.15s !important;
+}
+[data-testid="stButton"] > button:not([kind="primary"]):hover {
+    border-color: #c9a84c !important;
+    color: #c9a84c !important;
+}
+
+/* ── Tabs: understated gold active line ── */
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: 2px solid #e8ecf0 !important;
+    gap: 0.25rem;
+}
+[data-testid="stTabs"] button[role="tab"] {
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    color: #5a6a7a !important;
+    border-radius: 6px 6px 0 0 !important;
+    padding: 0.5rem 1rem !important;
+    transition: all 0.15s;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: #0d1b2a !important;
+    font-weight: 700 !important;
+    border-bottom: 3px solid #c9a84c !important;
+    background: transparent !important;
+}
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+    border: 1px solid #e8ecf0 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 1px 4px rgba(13,27,42,0.04);
+    margin-bottom: 0.5rem;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600 !important;
+    color: #1a2f4a !important;
+}
+
+/* ── Info / success / warning boxes ── */
+[data-testid="stAlert"] {
+    border-radius: 10px !important;
+    border-left-width: 4px !important;
+}
+
+/* ── Input fields ── */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+    border-radius: 8px !important;
+    border: 1px solid #d0d8e0 !important;
+    font-size: 0.9rem !important;
+    transition: border-color 0.15s;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus {
+    border-color: #c9a84c !important;
+    box-shadow: 0 0 0 2px rgba(201,168,76,0.15) !important;
+}
+
+/* ── Selectbox ── */
+[data-testid="stSelectbox"] > div > div {
+    border-radius: 8px !important;
+    border: 1px solid #d0d8e0 !important;
+}
+
+/* ── Dataframes: clean alternating rows ── */
+[data-testid="stDataFrame"] {
+    border-radius: 10px !important;
+    overflow: hidden;
+    box-shadow: 0 1px 6px rgba(13,27,42,0.06);
+}
+
+/* ── Gradient heatmap tables ── */
+div[style*="overflow-x:auto"] {
+    border-radius: 10px;
+    border: 1px solid #e0e6ed;
+    box-shadow: 0 2px 8px rgba(13,27,42,0.06);
+}
+
+/* ── Divider ── */
+hr { border-color: #e8ecf0 !important; }
+
+/* ── Caption / helper text ── */
+.stCaption, [data-testid="stCaptionContainer"] {
+    color: #7a8a9a !important;
+    font-size: 0.78rem !important;
+}
+
+/* ══════════ MOBILE ══════════ */
 @media (max-width: 768px) {
-    .block-container { padding: 0.5rem 0.5rem 4rem !important; }
-
-    /* Stack metric cards vertically */
-    [data-testid="stMetric"] { min-width: 120px; }
+    .block-container { padding: 0.75rem 0.75rem 4rem !important; }
+    [data-testid="stMetric"] { padding: 0.75rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
     [data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
-
-    /* Make tabs scrollable horizontally */
     [data-testid="stTabs"] > div:first-child {
         overflow-x: auto !important;
         flex-wrap: nowrap !important;
         -webkit-overflow-scrolling: touch;
     }
-    [data-testid="stTabs"] button { white-space: nowrap; font-size: 0.75rem; padding: 0.3rem 0.5rem; }
-
-    /* Full-width inputs */
-    [data-testid="stTextInput"] input,
-    [data-testid="stNumberInput"] input,
-    [data-testid="stSelectbox"] { width: 100% !important; }
-
-    /* Buttons full width on mobile */
+    [data-testid="stTabs"] button { white-space: nowrap; font-size: 0.72rem; padding: 0.3rem 0.6rem; }
     [data-testid="stButton"] > button { width: 100%; margin-bottom: 0.5rem; }
-
-    /* Heatmap tables — horizontal scroll */
-    div[style*="overflow-x:auto"] { font-size: 11px !important; }
     div[style*="overflow-x:auto"] td, div[style*="overflow-x:auto"] th {
-        padding: 3px 5px !important;
-        font-size: 11px !important;
+        padding: 3px 5px !important; font-size: 11px !important;
     }
-
-    /* Charts don't overflow */
-    [data-testid="stArrowVegaLiteChart"] { overflow-x: auto; }
-
-    /* Hide decorative elements to save space */
     .stDecoration { display: none; }
-
-    /* Sidebar toggle button — always visible */
     [data-testid="collapsedControl"] { display: block !important; }
+    footer { display: none; }
+    header { display: none; }
 }
 
-/* ── Tablet (768–1024px) ── */
+/* ══════════ TABLET ══════════ */
 @media (min-width: 769px) and (max-width: 1024px) {
     .block-container { padding: 1rem 1.5rem !important; }
     [data-testid="stTabs"] button { font-size: 0.8rem; }
 }
 
-/* ── Metric cards: wrap on small screens ── */
-[data-testid="stHorizontalBlock"] {
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-/* ── Gradient heatmap tables: always scrollable ── */
-div[style*="overflow-x:auto"] {
-    border-radius: 6px;
-    border: 1px solid #e0e0e0;
-}
-
-/* ── Bottom navigation bar on mobile (replaces sidebar) ── */
-@media (max-width: 768px) {
-    /* Sticky bottom bar hint */
-    footer { display: none; }
-    #MainMenu { display: none; }
-    header { display: none; }
-}
+/* ── Metric cards wrap on small screens ── */
+[data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.75rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🏠 PropertyOS")
-    st.caption("Singapore Property Intelligence")
+    st.markdown('<p style="font-size:1.4rem;font-weight:700;color:#c9a84c;margin:0">🏠 PropOS</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:0.78rem;color:#8a9bac;margin-top:-4px;margin-bottom:1rem">Singapore Property Intelligence</p>', unsafe_allow_html=True)
 
     mode_info = get_current_mode()
     mode_colors = {"free": "🟢", "balanced": "🟡", "quality": "🔵", "premium": "🟣"}
@@ -1595,6 +1736,16 @@ Open Telegram → message **@userinfobot** → it replies with your numeric ID (
         wl_min_area = w2.number_input("Min floor area (sqm, 0 = no limit)", value=0, step=5, min_value=0, key="wl_min_area")
         wl_threshold = w2.slider("Alert when below market by (%)", 0, 20, 5, key="wl_thresh",
                                   help="0 = alert on any match; 5 = only if 5%+ below median PSF")
+        wl_frequency = w2.selectbox(
+            "Alert frequency",
+            ["daily", "weekly", "monthly", "hourly"],
+            index=0,
+            key="wl_freq",
+            help="How often you want to receive alerts. Daily is recommended — avoids notification overload.",
+        )
+        _freq_labels = {"hourly": "every hour", "daily": "once per day at most",
+                        "weekly": "once per week at most", "monthly": "once per month at most"}
+        w2.caption(f"ℹ️ You'll be alerted {_freq_labels.get(wl_frequency, 'daily')}.")
 
         if st.button("➕ Save Alert", type="primary", key="wl_add"):
             if not wl_label:
@@ -1609,8 +1760,9 @@ Open Telegram → message **@userinfobot** → it replies with your numeric ID (
                     max_price_sgd=wl_max_price or None,
                     min_floor_sqm=wl_min_area or None,
                     alert_threshold_pct=float(wl_threshold),
+                    alert_frequency=wl_frequency,
                 )
-                st.success(f"✅ Alert #{wid} saved: **{wl_label}**")
+                st.success(f"✅ Alert #{wid} saved: **{wl_label}** · alerts {_freq_labels[wl_frequency]}")
                 st.rerun()
 
     # ── My Watches ─────────────────────────────────────────────────────────────
@@ -1628,6 +1780,7 @@ Open Telegram → message **@userinfobot** → it replies with your numeric ID (
                 if w["max_price_sgd"]: criteria.append(f"Max: SGD {w['max_price_sgd']:,.0f}")
                 if w["min_floor_sqm"]: criteria.append(f"Min area: {w['min_floor_sqm']} sqm")
                 criteria.append(f"Alert when ≥{w['alert_threshold_pct']}% below market")
+                criteria.append(f"Frequency: {w.get('alert_frequency','daily')}")
 
                 with st.expander(f"🔔 {w['label']}  (#{w['id']})"):
                     st.markdown(" · ".join(criteria))

@@ -36,6 +36,7 @@ def init_watchlist_db():
                 alert_threshold_pct REAL DEFAULT 5.0,
                 is_active BOOLEAN DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
+                alert_frequency TEXT DEFAULT 'daily',
                 last_alerted_at TEXT,
                 last_checked_at TEXT
             )
@@ -61,6 +62,9 @@ def init_watchlist_db():
         c.commit()
 
 
+FREQUENCY_HOURS = {"hourly": 1, "daily": 24, "weekly": 168, "monthly": 720}
+
+
 def add_watch(
     user_id: str,
     label: str,
@@ -70,6 +74,7 @@ def add_watch(
     max_price_sgd: float | None = None,
     min_floor_sqm: float | None = None,
     alert_threshold_pct: float = 5.0,
+    alert_frequency: str = "daily",
 ) -> int:
     """Add a watchlist entry. Returns new row id."""
     init_watchlist_db()
@@ -77,10 +82,10 @@ def add_watch(
         cur = c.execute("""
             INSERT INTO watchlist
               (user_id, label, town, flat_type, street_keyword, max_price_sgd,
-               min_floor_sqm, alert_threshold_pct)
-            VALUES (?,?,?,?,?,?,?,?)
+               min_floor_sqm, alert_threshold_pct, alert_frequency)
+            VALUES (?,?,?,?,?,?,?,?,?)
         """, (user_id, label, town, flat_type, street_keyword,
-              max_price_sgd, min_floor_sqm, alert_threshold_pct))
+              max_price_sgd, min_floor_sqm, alert_threshold_pct, alert_frequency))
         c.commit()
         return cur.lastrowid
 
@@ -152,6 +157,16 @@ def check_watchlist() -> list[dict]:
 
     alerts = []
     for watch in watches:
+        # Respect alert frequency — skip if alerted too recently
+        freq_hours = FREQUENCY_HOURS.get(watch.get("alert_frequency", "daily"), 24)
+        if watch.get("last_alerted_at"):
+            try:
+                last = datetime.fromisoformat(watch["last_alerted_at"])
+                if (datetime.now() - last).total_seconds() < freq_hours * 3600:
+                    continue
+            except Exception:
+                pass
+
         for rec in recent:
             if not _matches(watch, rec):
                 continue
@@ -218,12 +233,19 @@ def check_watchlist() -> list[dict]:
             except Exception:
                 continue
 
-        # Update last_checked_at
+        # Update timestamps
+        watch_alerts = [a for a in alerts if a["watch_id"] == watch["id"]]
         with _conn() as db:
-            db.execute(
-                "UPDATE watchlist SET last_checked_at=datetime('now') WHERE id=?",
-                (watch["id"],)
-            )
+            if watch_alerts:
+                db.execute(
+                    "UPDATE watchlist SET last_checked_at=datetime('now'), last_alerted_at=datetime('now') WHERE id=?",
+                    (watch["id"],)
+                )
+            else:
+                db.execute(
+                    "UPDATE watchlist SET last_checked_at=datetime('now') WHERE id=?",
+                    (watch["id"],)
+                )
             db.commit()
 
     return alerts
