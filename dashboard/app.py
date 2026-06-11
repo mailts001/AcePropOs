@@ -8,6 +8,7 @@ import streamlit as st
 import json
 import sys
 import os
+import uuid
 from pathlib import Path
 from datetime import date
 
@@ -402,6 +403,29 @@ with st.sidebar:
 - **Home Contents** — Covers furniture, appliances, and belongings inside your home.
         """)
     st.caption("v1.0 · acepropos.duckdns.org")
+
+# ── Session tracking (analytics) ─────────────────────────────────────────────
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())[:12]
+_session_id = st.session_state["session_id"]
+
+try:
+    from data.analytics import track_pageview, ensure_schema
+    ensure_schema()
+    # Get real IP from Streamlit headers when behind nginx proxy
+    _headers = st.context.headers if hasattr(st, "context") else {}
+    _visitor_ip = (
+        _headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or _headers.get("X-Real-Ip", "")
+        or ""
+    )
+    track_pageview(
+        page=tab_select,
+        session_id=_session_id,
+        ip=_visitor_ip,
+    )
+except Exception:
+    pass
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
 if tab_select == "🏠 Address Lookup":
@@ -1941,6 +1965,11 @@ elif tab_select == "🏦 Mortgage":
                     asyncio.run(_send_broker_lead())
                 except Exception:
                     pass
+                try:
+                    from data.analytics import log_broker_lead
+                    log_broker_lead(br_name, br_email, br_phone, br_loan, br_prop_type, br_timeline, br_notes, session_id=_session_id, ip=_visitor_ip)
+                except Exception:
+                    pass
                 st.success(
                     f"✅ Thank you {br_name}! Your request has been received. "
                     "A licensed mortgage broker will contact you within 1 business day. "
@@ -2691,7 +2720,8 @@ elif tab_select == "⚖️ Compare":
 
     from data.hdb_pipeline import fetch_hdb_resale, get_town_stats
     from data.stamp_duty import full_stamp_duty
-    from agents.mortgage_agent import calculate as calc_mortgage
+    _mort_agent = MortgageAgent()
+    def calc_mortgage(price, loan, tenure, rate, cpf): return _mort_agent.calculate(price, loan, tenure, rate, cpf)
 
     n_props = st.radio("Number of properties to compare", [2, 3], horizontal=True)
 
@@ -2979,6 +3009,82 @@ elif tab_select == "⚙️ Admin":
                 st.caption(f"Current: **{_ti['tier'].upper()}** · {_ti['alerts_used_this_week']} alerts this week · expires {_ti.get('expires_at','—')}")
             except Exception:
                 pass
+
+        st.divider()
+        st.subheader("📊 Visitor Analytics")
+        from data.analytics import get_summary, get_engaged_sessions, get_broker_leads, ai_visitor_summary
+        import pandas as _apd
+
+        _an_days = st.radio("Period", [7, 30, 90], index=1, horizontal=True, key="an_days")
+        stats = get_summary(_an_days)
+        engaged = get_engaged_sessions(_an_days)
+        leads = get_broker_leads(_an_days)
+
+        # KPI row
+        ak1, ak2, ak3, ak4, ak5, ak6 = st.columns(6)
+        ak1.metric("Unique Visitors", stats["unique_visitors_ip"])
+        ak2.metric("Sessions", stats["unique_sessions"])
+        ak3.metric("Page Views", stats["total_views"])
+        ak4.metric("Avg Pages/Session", stats["avg_pages_per_session"])
+        ak5.metric("Broker Leads", stats["broker_leads"])
+        ak6.metric("Telegram Users", stats["telegram_users"])
+
+        # Visitor type breakdown
+        vt = stats["by_visitor_type"]
+        if vt:
+            av1, av2 = st.columns(2)
+            with av1:
+                st.markdown("**Visitor Type Breakdown**")
+                for vtype, cnt in sorted(vt.items(), key=lambda x: -x[1]):
+                    icon = {"consumer":"👤","corporate":"🏢","internal":"🔒","local":"💻"}.get(vtype,"❓")
+                    st.write(f"{icon} **{vtype.title()}**: {cnt} unique IPs")
+            with av2:
+                st.markdown("**Top Pages**")
+                for p in stats["by_page"][:6]:
+                    st.write(f"• {p['page']} — {p['views']} views")
+
+        # Daily trend
+        if stats["by_day"]:
+            trend_df = _apd.DataFrame(stats["by_day"]).set_index("date")
+            st.markdown("**Daily Traffic**")
+            st.bar_chart(trend_df["views"])
+
+        # Top features
+        if stats["top_features"]:
+            st.markdown("**Most Used Features**")
+            feat_df = _apd.DataFrame(stats["top_features"])
+            st.dataframe(feat_df, hide_index=True, use_container_width=True)
+
+        # Engaged sessions
+        if engaged:
+            st.markdown(f"**Power Users — {len(engaged)} sessions with 3+ pages**")
+            eng_rows = []
+            for s in engaged[:20]:
+                contact = s.get("telegram_id") or s.get("email") or "anonymous"
+                eng_rows.append({
+                    "Session": s["session_id"][:8],
+                    "Pages": s["page_count"],
+                    "Visited": s["pages_visited"][:60] + "…" if len(s.get("pages_visited","")) > 60 else s.get("pages_visited",""),
+                    "Contact": contact,
+                    "Type": s.get("visitor_type",""),
+                    "First Seen": s.get("first_seen","")[:16],
+                })
+            st.dataframe(_apd.DataFrame(eng_rows), hide_index=True, use_container_width=True)
+
+        # Broker leads table
+        if leads:
+            st.markdown(f"**Broker Referral Leads — {len(leads)} total**")
+            lead_rows = [{"Date": l["ts"][:10], "Name": l["name"], "Email": l["email"],
+                          "Phone": l.get("phone",""), "Loan": f"SGD {l['loan_sgd']:,.0f}",
+                          "Type": l["prop_type"], "Timeline": l["timeline"]} for l in leads]
+            st.dataframe(_apd.DataFrame(lead_rows), hide_index=True, use_container_width=True)
+
+        # AI summary
+        st.divider()
+        st.markdown("**🤖 AI Business Intelligence Summary**")
+        _ai_sum = ai_visitor_summary(stats, engaged)
+        st.markdown(_ai_sum)
+        st.caption("Rule-based analysis — no API cost. Pattern interpretation from traffic data.")
 
         st.divider()
         st.subheader("💰 Token Cost Tracker")

@@ -15,19 +15,21 @@ from datetime import datetime
 
 print(f"[URA Rentals] Starting sync at {datetime.now().isoformat()}")
 
+# Step 1: Quarterly median rents (free tier — works reliably)
+try:
+    medians = fetch_rental_medians(force=True)
+    print(f"[URA Rentals] Median records: {len(medians)} ✓")
+except Exception as e:
+    print(f"[URA Rentals] Medians failed: {e}")
+
+# Step 2: Individual rental transactions (may require higher URA access tier)
 total = 0
 for batch in range(1, 5):
     try:
         txns = fetch_rental_transactions(batch, force=True)
         total += len(txns)
-        print(f"[URA Rentals] Batch {batch}: {len(txns)} rental transactions")
+        print(f"[URA Rentals] Batch {batch}: {len(txns)} rental transactions ✓")
     except Exception as e:
-        print(f"[URA Rentals] Batch {batch} failed: {e}")
-
-try:
-    medians = fetch_rental_medians(force=True)
-    print(f"[URA Rentals] Median records: {len(medians)}")
-except Exception as e:
-    print(f"[URA Rentals] Medians failed: {e}")
+        print(f"[URA Rentals] Batch {batch} skipped ({e}) — median data is sufficient for yield display")
 
 print(f"[URA Rentals] Done. Total rental transactions: {total}")
