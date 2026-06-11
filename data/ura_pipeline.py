@@ -107,17 +107,25 @@ def _normalise_transactions(raw_results: list) -> list[dict]:
         street = project.get("street", "")
         x_coord = project.get("x", "")
         y_coord = project.get("y", "")
+        # District can sit at project level OR transaction level depending on URA batch format
+        project_district = _extract_district(
+            project.get("district", "") or project.get("districtId", "")
+        )
 
         for txn in project.get("transaction", []):
             try:
                 area_sqm = float(txn.get("area", 0))
                 price = float(txn.get("price", 0))
                 psf = round(price / (area_sqm * 10.7639), 0) if area_sqm > 0 else 0
+                # Use transaction-level district first, fall back to project-level
+                district = _extract_district(
+                    txn.get("district", "") or txn.get("districtId", "")
+                ) or project_district
 
                 out.append({
                     "project": project_name,
                     "street": street,
-                    "district": _extract_district(txn.get("districtId", "")),
+                    "district": district,
                     "area_sqm": area_sqm,
                     "area_sqft": round(area_sqm * 10.7639, 0),
                     "price_sgd": price,
