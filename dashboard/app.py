@@ -106,7 +106,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={
-        "Get Help": "https://t.me/askAceBot",
+        "Get Help": "https://t.me/AcePropOS_bot",
         "Report a bug": "mailto:mailtsjp@gmail.com",
         "About": (
             "## PropOS — Singapore Property Intelligence\n\n"
@@ -116,7 +116,7 @@ st.set_page_config(
             "BTO tracker · Price alerts\n\n"
             "**Contact:** mailtsjp@gmail.com\n\n"
             "**Telegram channel:** https://t.me/AcePropOs_Ch\n\n"
-            "**Telegram bot:** @askAceBot\n\n"
+            "**Telegram bot:** @AcePropOS_bot\n\n"
             "_Data sources: HDB Resale (data.gov.sg), URA (ura.gov.sg), "
             "RSS news feeds. Not financial advice._"
         ),
@@ -126,215 +126,168 @@ st.set_page_config(
 # ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ═══════════════════════════════════════════════════════
-   PROPOS PREMIUM THEME — Dark Navy + Gold
-   ═══════════════════════════════════════════════════════ */
-
-/* Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* ── Global typography ── */
-html, body, [class*="css"] {
+/* ── Font only — let Streamlit handle all colors so dark/light mode works ── */
+html, body, [class*="css"], button, input, select, textarea {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
-/* ── Base layout ── */
+/* ── Layout ── */
 .block-container {
-    padding: 1.5rem 1.5rem 3rem !important;
+    padding: 1.25rem 1.5rem 3rem !important;
     max-width: 1280px;
 }
 
-/* ── Sidebar: dark navy ── */
+/* ── Sidebar: dark navy only inside sidebar ── */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0d1b2a 0%, #1a2f4a 100%) !important;
-    border-right: 1px solid #c9a84c30 !important;
+    border-right: 1px solid rgba(201,168,76,0.2) !important;
 }
-[data-testid="stSidebar"] * {
-    color: #e8edf2 !important;
+/* Only target direct text nodes in sidebar — not nested content panes */
+[data-testid="stSidebar"] > div > div > div,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] span:not([data-testid]),
+[data-testid="stSidebar"] small {
+    color: #c8d8e8 !important;
 }
-[data-testid="stSidebar"] .stRadio label {
-    color: #b8c8d8 !important;
-    font-size: 0.88rem;
-    padding: 0.25rem 0;
-}
-[data-testid="stSidebar"] .stRadio label:hover {
-    color: #c9a84c !important;
-}
-/* Selected nav item gold */
-[data-testid="stSidebar"] .stRadio [aria-checked="true"] + div {
+[data-testid="stSidebar"] .stRadio label { font-size: 0.88rem; }
+[data-testid="stSidebar"] [data-baseweb="radio"] [aria-checked="true"] ~ span {
     color: #c9a84c !important;
     font-weight: 600;
 }
 
-/* ── Page headers ── */
-h1 { font-weight: 700 !important; color: #0d1b2a !important; letter-spacing: -0.5px; }
-h2 { font-weight: 600 !important; color: #1a2f4a !important; }
-h3 { font-weight: 600 !important; color: #1a2f4a !important; }
-
-/* ── Metric cards: card shadow + gold label ── */
-[data-testid="stMetric"] {
-    background: #ffffff;
-    border: 1px solid #e8ecf0;
-    border-radius: 12px;
-    padding: 1rem 1.25rem !important;
-    box-shadow: 0 2px 8px rgba(13,27,42,0.06);
-    transition: box-shadow 0.2s;
-}
-[data-testid="stMetric"]:hover {
-    box-shadow: 0 4px 16px rgba(13,27,42,0.12);
-}
-[data-testid="stMetricLabel"] {
-    font-size: 0.75rem !important;
-    font-weight: 600 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.5px !important;
-    color: #7a8a9a !important;
-}
-[data-testid="stMetricValue"] {
-    font-size: 1.5rem !important;
-    font-weight: 700 !important;
-    color: #0d1b2a !important;
-}
-
 /* ── Primary buttons: gold ── */
+button[kind="primary"],
 [data-testid="stButton"] > button[kind="primary"] {
-    background: linear-gradient(135deg, #c9a84c 0%, #e8c96a 100%) !important;
+    background: linear-gradient(135deg, #c9a84c, #e8c96a) !important;
     color: #0d1b2a !important;
     border: none !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
-    font-size: 0.9rem !important;
-    padding: 0.55rem 1.5rem !important;
-    box-shadow: 0 2px 8px rgba(201,168,76,0.35) !important;
-    transition: all 0.2s !important;
+    padding: 0.5rem 1.4rem !important;
+    box-shadow: 0 2px 10px rgba(201,168,76,0.4) !important;
+    transition: box-shadow 0.2s, transform 0.15s !important;
 }
-[data-testid="stButton"] > button[kind="primary"]:hover {
-    box-shadow: 0 4px 16px rgba(201,168,76,0.55) !important;
-    transform: translateY(-1px);
+button[kind="primary"]:hover {
+    box-shadow: 0 4px 18px rgba(201,168,76,0.6) !important;
+    transform: translateY(-1px) !important;
 }
 
 /* ── Secondary buttons ── */
 [data-testid="stButton"] > button:not([kind="primary"]) {
     border-radius: 8px !important;
-    border: 1px solid #d0d8e0 !important;
-    font-weight: 500 !important;
-    transition: all 0.15s !important;
+    transition: border-color 0.15s !important;
 }
 [data-testid="stButton"] > button:not([kind="primary"]):hover {
     border-color: #c9a84c !important;
-    color: #c9a84c !important;
 }
 
-/* ── Tabs: understated gold active line ── */
-[data-testid="stTabs"] [role="tablist"] {
-    border-bottom: 2px solid #e8ecf0 !important;
-    gap: 0.25rem;
-}
-[data-testid="stTabs"] button[role="tab"] {
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    color: #5a6a7a !important;
-    border-radius: 6px 6px 0 0 !important;
-    padding: 0.5rem 1rem !important;
-    transition: all 0.15s;
-}
+/* ── Active tab: gold underline, inherits text color ── */
 [data-testid="stTabs"] button[aria-selected="true"] {
-    color: #0d1b2a !important;
     font-weight: 700 !important;
     border-bottom: 3px solid #c9a84c !important;
-    background: transparent !important;
+}
+[data-testid="stTabs"] > div:first-child {
+    border-bottom: 1px solid rgba(128,128,128,0.2) !important;
+}
+
+/* ── Metric cards: subtle border + shadow, no background override ── */
+[data-testid="stMetric"] {
+    border: 1px solid rgba(128,128,128,0.15) !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.2rem !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+    transition: box-shadow 0.2s;
+}
+[data-testid="stMetric"]:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important;
+}
+[data-testid="stMetricLabel"] > div {
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    opacity: 0.65;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.45rem !important;
+    font-weight: 700 !important;
 }
 
 /* ── Expander ── */
 [data-testid="stExpander"] {
-    border: 1px solid #e8ecf0 !important;
+    border: 1px solid rgba(128,128,128,0.18) !important;
     border-radius: 10px !important;
-    box-shadow: 0 1px 4px rgba(13,27,42,0.04);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04) !important;
     margin-bottom: 0.5rem;
 }
-[data-testid="stExpander"] summary {
-    font-weight: 600 !important;
-    color: #1a2f4a !important;
-}
 
-/* ── Info / success / warning boxes ── */
+/* ── Alerts ── */
 [data-testid="stAlert"] {
     border-radius: 10px !important;
     border-left-width: 4px !important;
 }
 
-/* ── Input fields ── */
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input {
-    border-radius: 8px !important;
-    border: 1px solid #d0d8e0 !important;
-    font-size: 0.9rem !important;
-    transition: border-color 0.15s;
-}
+/* ── Input focus: gold ring ── */
 [data-testid="stTextInput"] input:focus,
 [data-testid="stNumberInput"] input:focus {
     border-color: #c9a84c !important;
-    box-shadow: 0 0 0 2px rgba(201,168,76,0.15) !important;
+    box-shadow: 0 0 0 2px rgba(201,168,76,0.2) !important;
+    outline: none !important;
 }
 
-/* ── Selectbox ── */
-[data-testid="stSelectbox"] > div > div {
-    border-radius: 8px !important;
-    border: 1px solid #d0d8e0 !important;
-}
-
-/* ── Dataframes: clean alternating rows ── */
+/* ── Dataframes ── */
 [data-testid="stDataFrame"] {
     border-radius: 10px !important;
     overflow: hidden;
-    box-shadow: 0 1px 6px rgba(13,27,42,0.06);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06) !important;
 }
 
-/* ── Gradient heatmap tables ── */
+/* ── Gradient HTML tables ── */
 div[style*="overflow-x:auto"] {
     border-radius: 10px;
-    border: 1px solid #e0e6ed;
-    box-shadow: 0 2px 8px rgba(13,27,42,0.06);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
 }
 
 /* ── Divider ── */
-hr { border-color: #e8ecf0 !important; }
-
-/* ── Caption / helper text ── */
-.stCaption, [data-testid="stCaptionContainer"] {
-    color: #7a8a9a !important;
-    font-size: 0.78rem !important;
-}
+hr { opacity: 0.2 !important; }
 
 /* ══════════ MOBILE ══════════ */
 @media (max-width: 768px) {
-    .block-container { padding: 0.75rem 0.75rem 4rem !important; }
+    /* Give room below Streamlit's fixed top bar (~3.5rem) */
+    .block-container { padding: 4rem 0.75rem 5rem !important; }
     [data-testid="stMetric"] { padding: 0.75rem !important; }
-    [data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.15rem !important; }
+    /* Stack columns */
     [data-testid="column"] { min-width: 100% !important; flex: 1 1 100% !important; }
+    /* Scrollable tab row */
     [data-testid="stTabs"] > div:first-child {
         overflow-x: auto !important;
         flex-wrap: nowrap !important;
         -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }
+    [data-testid="stTabs"] > div:first-child::-webkit-scrollbar { display: none; }
     [data-testid="stTabs"] button { white-space: nowrap; font-size: 0.72rem; padding: 0.3rem 0.6rem; }
-    [data-testid="stButton"] > button { width: 100%; margin-bottom: 0.5rem; }
+    /* Full-width buttons */
+    [data-testid="stButton"] > button { width: 100%; margin-bottom: 0.4rem; }
+    /* Compact HTML tables */
     div[style*="overflow-x:auto"] td, div[style*="overflow-x:auto"] th {
         padding: 3px 5px !important; font-size: 11px !important;
     }
-    .stDecoration { display: none; }
-    [data-testid="collapsedControl"] { display: block !important; }
+    /* Keep Streamlit header — don't hide it (causes title clip) */
     footer { display: none; }
-    header { display: none; }
 }
 
 /* ══════════ TABLET ══════════ */
 @media (min-width: 769px) and (max-width: 1024px) {
-    .block-container { padding: 1rem 1.5rem !important; }
+    .block-container { padding: 1rem 1.25rem !important; }
     [data-testid="stTabs"] button { font-size: 0.8rem; }
 }
 
-/* ── Metric cards wrap on small screens ── */
+/* ── Wrap metric rows ── */
 [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.75rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -1685,7 +1638,8 @@ elif tab_select == "💹 Tools":
     # ── Stamp Duty ─────────────────────────────────────────────────────────────
     with tool_tab1:
         st.subheader("Stamp Duty Calculator")
-        st.caption("Rates effective Feb 2023. BSD applies to all buyers. ABSD is additional based on profile and property count.")
+        from data.stamp_duty import RATES_EFFECTIVE_DATE
+        st.caption(f"Rates effective {RATES_EFFECTIVE_DATE} (IRAS). BSD applies to all buyers. ABSD is additional based on profile and property count. Verify at iras.gov.sg before transacting.")
 
         sd1, sd2 = st.columns(2)
         sd_price = sd1.number_input("Purchase Price (SGD)", value=1_000_000, step=50_000, min_value=100_000, key="sd_price")

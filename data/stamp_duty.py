@@ -3,6 +3,9 @@ Singapore Stamp Duty Calculator — ABSD + BSD (as of 2023 cooling measures).
 Pure rule-based, zero API cost. Updates as government announces changes.
 """
 
+RATES_EFFECTIVE_DATE = "27 Apr 2023"   # Last updated: ABSD hike Budget 2023
+# ⚠️ Check iras.gov.sg after every Singapore Budget for rate changes.
+
 # ── Buyer's Stamp Duty (BSD) ─────────────────────────────────────────────────
 # Same for all buyer profiles. Applied on purchase price or market value, whichever higher.
 BSD_BANDS = [
