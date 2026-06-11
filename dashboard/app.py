@@ -95,6 +95,8 @@ from agents.deal_hunter_agent import DealHunterAgent
 from agents.news_intel_agent import NewsIntelAgent
 from agents.insurance_agent import InsuranceAgent
 from agents.mortgage_agent import MortgageAgent, BANK_RATES, SORA_3M
+from data.watchlist import (init_watchlist_db, add_watch, list_watches,
+                             delete_watch, check_watchlist, format_alert_message)
 from core.llm_router import save_mode, get_current_mode, get_token_summary
 from data.news_pipeline import get_sentiment_index
 
@@ -192,7 +194,7 @@ with st.sidebar:
     st.divider()
     tab_select = st.radio(
         "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "⚙️ Admin"],
+        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "🔔 Watchlist", "⚙️ Admin"],
     )
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
@@ -1466,6 +1468,118 @@ elif tab_select == "🏦 Mortgage":
             )
             if st.button("💬 Run MRTA Analysis", key="mrta_from_aff"):
                 st.info("Head to the 🛡️ Insurance tab → Analyse to build your full insurance portfolio including MRTA/MLTA coverage.")
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+elif tab_select == "🔔 Watchlist":
+    st.header("🔔 Property Watchlist & Price Alerts")
+    st.caption("Save search criteria and get alerted when HDB transactions match — especially below-market deals.")
+
+    init_watchlist_db()
+
+    # Use session telegram ID or a guest ID
+    _user_id = st.text_input(
+        "Your Telegram ID (for alerts) — or leave as 'guest' to just browse",
+        value=str(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "guest")),
+        key="wl_user_id",
+    )
+
+    wl_tab1, wl_tab2, wl_tab3 = st.tabs(["➕ Add Watch", "📋 My Watches", "🔍 Run Check Now"])
+
+    # ── Add Watch ──────────────────────────────────────────────────────────────
+    with wl_tab1:
+        st.subheader("Add a new property alert")
+        import pandas as _pd
+        # Load town options from HDB cache
+        cache_path = Path(__file__).parent.parent / "cache" / "hdb" / "resale.json"
+        town_options = ["Any"]
+        flat_type_options = ["Any", "3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE"]
+        if cache_path.exists():
+            try:
+                _recs = json.load(open(cache_path))
+                town_options = ["Any"] + sorted(set(r.get("town","") for r in _recs if r.get("town")))
+                flat_type_options = ["Any"] + sorted(set(r.get("flat_type","") for r in _recs if r.get("flat_type")))
+            except Exception:
+                pass
+
+        w1, w2 = st.columns(2)
+        wl_label = w1.text_input("Alert name", placeholder="e.g. Tampines 4-room under 600K")
+        wl_town = w1.selectbox("Town", town_options, key="wl_town")
+        wl_flat = w1.selectbox("Flat type", flat_type_options, key="wl_flat")
+        wl_street = w1.text_input("Street keyword (optional)", placeholder="e.g. TAMPINES ST")
+
+        wl_max_price = w2.number_input("Max price (SGD, 0 = no limit)", value=0, step=10000, min_value=0, key="wl_max")
+        wl_min_area = w2.number_input("Min floor area (sqm, 0 = no limit)", value=0, step=5, min_value=0, key="wl_min_area")
+        wl_threshold = w2.slider("Alert when below market by (%)", 0, 20, 5, key="wl_thresh",
+                                  help="0 = alert on any match; 5 = only if 5%+ below median PSF")
+
+        if st.button("➕ Save Alert", type="primary", key="wl_add"):
+            if not wl_label:
+                st.warning("Please enter an alert name.")
+            else:
+                wid = add_watch(
+                    user_id=_user_id,
+                    label=wl_label,
+                    town=None if wl_town == "Any" else wl_town,
+                    flat_type=None if wl_flat == "Any" else wl_flat,
+                    street_keyword=wl_street or None,
+                    max_price_sgd=wl_max_price or None,
+                    min_floor_sqm=wl_min_area or None,
+                    alert_threshold_pct=float(wl_threshold),
+                )
+                st.success(f"✅ Alert #{wid} saved: **{wl_label}**")
+                st.rerun()
+
+    # ── My Watches ─────────────────────────────────────────────────────────────
+    with wl_tab2:
+        watches = list_watches(_user_id)
+        if not watches:
+            st.info("No active alerts yet. Add one in the ➕ Add Watch tab.")
+        else:
+            st.markdown(f"**{len(watches)} active alert(s)**")
+            for w in watches:
+                criteria = []
+                if w["town"]: criteria.append(f"Town: {w['town']}")
+                if w["flat_type"]: criteria.append(f"Type: {w['flat_type']}")
+                if w["street_keyword"]: criteria.append(f"Street: {w['street_keyword']}")
+                if w["max_price_sgd"]: criteria.append(f"Max: SGD {w['max_price_sgd']:,.0f}")
+                if w["min_floor_sqm"]: criteria.append(f"Min area: {w['min_floor_sqm']} sqm")
+                criteria.append(f"Alert when ≥{w['alert_threshold_pct']}% below market")
+
+                with st.expander(f"🔔 {w['label']}  (#{w['id']})"):
+                    st.markdown(" · ".join(criteria))
+                    st.caption(f"Created: {w['created_at'][:10]}  |  Last checked: {w.get('last_checked_at','never')[:10] if w.get('last_checked_at') else 'never'}  |  Last alerted: {w.get('last_alerted_at','never')}")
+                    if st.button(f"🗑️ Delete alert #{w['id']}", key=f"wl_del_{w['id']}"):
+                        delete_watch(w["id"], _user_id)
+                        st.success("Alert deleted.")
+                        st.rerun()
+
+    # ── Run Check ──────────────────────────────────────────────────────────────
+    with wl_tab3:
+        st.subheader("Scan HDB transactions against your alerts")
+        st.caption("This normally runs automatically every hour via cron. Run manually here to test.")
+
+        if st.button("🔍 Check All My Alerts Now", type="primary", key="wl_run"):
+            with st.spinner("Scanning last 30 days of HDB transactions..."):
+                fired = check_watchlist()
+                my_alerts = [a for a in fired if a["user_id"] == _user_id]
+
+            if not my_alerts:
+                st.info("No matches found. Either no qualifying transactions in the last 30 days, or alerts already sent.")
+            else:
+                st.success(f"🎯 {len(my_alerts)} match(es) found!")
+                for alert in my_alerts:
+                    with st.expander(f"🟢 {alert['town']} — {alert['flat_type']} · SGD {alert['price_sgd']:,.0f}"):
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Price", f"SGD {alert['price_sgd']:,.0f}")
+                        c2.metric("PSF", f"SGD {alert['psf']:,.0f}")
+                        c3.metric("vs Market PSF", f"SGD {alert['market_psf']:,.0f}",
+                                  delta=f"-{alert['discount_pct']}%" if alert['discount_pct'] > 0 else None,
+                                  delta_color="inverse")
+                        st.markdown(f"**{alert['block']} {alert['street']}** · {alert['storey']} · {alert['area_sqm']:.0f} sqm")
+                        st.caption(f"Transacted: {alert['month']}  |  Alert: {alert['label']}")
+
+                        with st.expander("Telegram message preview"):
+                            st.code(format_alert_message(alert), language=None)
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
