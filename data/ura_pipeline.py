@@ -22,6 +22,21 @@ URA_BASE = "https://eservice.ura.gov.sg/uraDataService"
 # URA requires a daily token fetched from the access key
 _token_cache_path = CACHE_DIR / "daily_token.json"
 
+# URA's WAF (L7 gateway) blocks requests without browser-like headers.
+# These headers bypass the bot-protection challenge page.
+_URA_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-SG,en;q=0.9",
+    "Referer": "https://www.ura.gov.sg/maps/",
+    "Origin": "https://www.ura.gov.sg",
+    "Connection": "keep-alive",
+}
+
 
 def get_daily_token() -> str:
     """Fetch or return cached URA daily auth token (valid 24h)."""
@@ -36,8 +51,8 @@ def get_daily_token() -> str:
 
     resp = requests.get(
         f"{URA_BASE}/insertNewToken/v1",
-        headers={"AccessKey": access_key},
-        timeout=10,
+        headers={**_URA_HEADERS, "AccessKey": access_key},
+        timeout=15,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -69,7 +84,7 @@ def fetch_private_transactions(batch: int = 1) -> list[dict]:
     resp = requests.get(
         f"{URA_BASE}/invokeUraDS/v1",
         params={"service": "PMI_Resi_Transaction", "batch": str(batch)},
-        headers={"AccessKey": access_key, "Token": token},
+        headers={**_URA_HEADERS, "AccessKey": access_key, "Token": token},
         timeout=30,
     )
     resp.raise_for_status()

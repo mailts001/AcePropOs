@@ -13,7 +13,7 @@ from datetime import datetime
 from collections import defaultdict
 import statistics
 
-from data.ura_pipeline import get_daily_token, URA_BASE
+from data.ura_pipeline import get_daily_token, URA_BASE, _URA_HEADERS
 
 CACHE_DIR = Path(__file__).parent.parent / "cache" / "ura"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,7 +37,7 @@ def fetch_rental_transactions(batch: int = 1, force: bool = False) -> list[dict]
     resp = requests.get(
         f"{URA_BASE}/invokeUraDS/v1",
         params={"service": "PMI_Resi_Rental", "batch": batch},
-        headers={"AccessKey": os.environ.get("URA_ACCESS_KEY", ""), "Token": token},
+        headers={**_URA_HEADERS, "AccessKey": os.environ.get("URA_ACCESS_KEY", ""), "Token": token},
         timeout=30,
     )
     resp.raise_for_status()
@@ -92,7 +92,7 @@ def fetch_rental_medians(force: bool = False) -> list[dict]:
     resp = requests.get(
         f"{URA_BASE}/invokeUraDS/v1",
         params={"service": "PMI_Resi_Rental_Median"},
-        headers={"AccessKey": os.environ.get("URA_ACCESS_KEY", ""), "Token": token},
+        headers={**_URA_HEADERS, "AccessKey": os.environ.get("URA_ACCESS_KEY", ""), "Token": token},
         timeout=30,
     )
     resp.raise_for_status()
