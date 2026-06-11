@@ -348,3 +348,37 @@ def get_all_subscribers(active_only: bool = True) -> list[dict]:
             else "SELECT * FROM subscribers ORDER BY subscribed_at DESC"
         rows = conn.execute(q).fetchall()
     return [dict(r) for r in rows]
+
+
+def unsubscribe_email(email: str) -> bool:
+    """Soft-delete: set active=0. Returns True if found and updated."""
+    ensure_schema()
+    email = email.strip().lower()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        rows = conn.execute(
+            "UPDATE subscribers SET active=0 WHERE email=?", (email,)
+        ).rowcount
+        conn.commit()
+    return rows > 0
+
+
+def delete_subscriber(email: str) -> bool:
+    """Hard-delete subscriber row. Admin use only."""
+    ensure_schema()
+    email = email.strip().lower()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        rows = conn.execute("DELETE FROM subscribers WHERE email=?", (email,)).rowcount
+        conn.commit()
+    return rows > 0
+
+
+def resubscribe_email(email: str) -> bool:
+    """Re-activate a previously unsubscribed email."""
+    ensure_schema()
+    email = email.strip().lower()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        rows = conn.execute(
+            "UPDATE subscribers SET active=1 WHERE email=?", (email,)
+        ).rowcount
+        conn.commit()
+    return rows > 0

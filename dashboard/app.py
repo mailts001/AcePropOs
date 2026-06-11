@@ -429,21 +429,21 @@ with st.sidebar:
         if st.button("Subscribe", key="cap_sub", use_container_width=True):
             if "@" in _cap_email and "." in _cap_email:
                 try:
-                    from data.analytics import add_subscriber, track_pageview as _tp_cap
+                    from data.analytics import add_subscriber, track_pageview as _tp_cap, resubscribe_email as _resub
                     _sub_result = add_subscriber(_cap_email.strip().lower(), source="sidebar")
                     _tp_cap("email_capture", session_id=st.session_state.get("session_id",""), email=_cap_email)
                     if _sub_result.get("new"):
-                        st.success("✅ Subscribed! Sending you a welcome email now…")
-                        # Try to send welcome email immediately
+                        st.success("✅ Subscribed! Sending welcome email…")
                         _sent = _send_welcome_email(_cap_email.strip().lower())
                         if _sent:
                             from data.analytics import mark_welcome_sent as _mws
                             _mws(_cap_email.strip().lower())
-                        st.session_state["_send_welcome_to"] = _cap_email.strip().lower()
                     else:
-                        st.info("Already subscribed! We'll keep you posted.")
+                        # Already in DB — re-activate in case they unsubscribed
+                        _resub(_cap_email.strip().lower())
+                        st.info("✅ You're already on our list — re-activated! We'll keep you posted on Singapore property intelligence.")
                 except Exception as _se:
-                    st.success("✅ Subscribed!")  # fail gracefully
+                    st.success("✅ Subscribed!")
             else:
                 st.warning("Enter a valid email address.")
 
@@ -460,13 +460,26 @@ with st.sidebar:
     except Exception:
         pass
 
+    # Rank pages by views for relative popularity stars — more stable than raw counts
+    _all_counts = list(_page_counts.values())
+    _all_counts.sort(reverse=True)
+
+    def _popularity_badge(cnt: int) -> str:
+        """Convert view count to a relative star badge. Empty string if low traffic."""
+        if not _all_counts or _all_counts[0] == 0:
+            return ""
+        rank_pct = cnt / _all_counts[0]  # fraction of max-viewed page
+        if rank_pct >= 1.0:  return " 🔥"      # most popular
+        if rank_pct >= 0.6:  return " ⭐⭐"
+        if rank_pct >= 0.3:  return " ⭐"
+        return ""
+
     def _label(pg: str) -> str:
-        """Short heat indicator — format_func so clean name is the stored value."""
+        """Popularity badge via format_func — clean page name is still stored value."""
         alias_key = _NAV_ALIASES.get(pg, pg)
         cnt = _page_counts.get(alias_key, _page_counts.get(pg, 0))
-        if cnt >= 50: return f"{pg} 🔥"
-        if cnt >= 5:  return f"{pg}  ({cnt}👁)"
-        return pg
+        badge = _popularity_badge(cnt)
+        return f"{pg}{badge}"
 
     st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
     # NO on_change — on_change callbacks interact badly with bidirectional
@@ -3846,6 +3859,94 @@ elif tab_select == "⚙️ Admin":
                 st.caption(f"Current: **{_ti['tier'].upper()}** · {_ti['alerts_used_this_week']} alerts this week · expires {_ti.get('expires_at','—')}")
             except Exception:
                 pass
+
+        st.divider()
+        # ── Subscriber Management ──────────────────────────────────────────────
+        st.subheader("📬 Subscriber Management")
+        from data.analytics import (
+            get_all_subscribers as _get_subs, get_subscriber_count as _sub_cnt,
+            unsubscribe_email as _unsub_email, delete_subscriber as _del_sub,
+            resubscribe_email as _resub_email, add_subscriber as _add_sub_admin
+        )
+        import pandas as _spd
+
+        _subs = _get_subs(active_only=False)
+        _active_cnt   = sum(1 for s in _subs if s["active"])
+        _inactive_cnt = sum(1 for s in _subs if not s["active"])
+
+        _sc1, _sc2, _sc3 = st.columns(3)
+        _sc1.metric("Active Subscribers", _active_cnt)
+        _sc2.metric("Unsubscribed", _inactive_cnt)
+        _sc3.metric("Total (all time)", len(_subs))
+
+        if _subs:
+            _sub_rows = []
+            for _s in _subs:
+                _sub_rows.append({
+                    "Email": _s["email"],
+                    "Subscribed": _s["subscribed_at"][:10],
+                    "Source": _s.get("source","sidebar"),
+                    "Welcome Sent": "✅" if _s["welcome_sent"] else "❌",
+                    "Status": "Active" if _s["active"] else "Unsubscribed",
+                })
+            _sub_df = _spd.DataFrame(_sub_rows)
+            st.dataframe(_sub_df, hide_index=True, use_container_width=True)
+
+            # CSV export
+            _csv = _sub_df.to_csv(index=False)
+            st.download_button(
+                "📥 Export CSV",
+                data=_csv,
+                file_name="propos_subscribers.csv",
+                mime="text/csv",
+                key="sub_csv_dl"
+            )
+
+        # Actions on individual subscriber
+        with st.expander("🔧 Manage a subscriber"):
+            _mgmt_email = st.text_input("Email address", key="sub_mgmt_email", placeholder="user@example.com")
+            _mg1, _mg2, _mg3, _mg4 = st.columns(4)
+            if _mg1.button("🔴 Unsubscribe", key="sub_do_unsub"):
+                if _mgmt_email and "@" in _mgmt_email:
+                    if _unsub_email(_mgmt_email):
+                        st.success(f"Unsubscribed: {_mgmt_email}")
+                    else:
+                        st.warning(f"Not found: {_mgmt_email}")
+                else:
+                    st.warning("Enter email first")
+
+            if _mg2.button("🟢 Re-activate", key="sub_do_resub"):
+                if _mgmt_email and "@" in _mgmt_email:
+                    if _resub_email(_mgmt_email):
+                        st.success(f"Re-activated: {_mgmt_email}")
+                    else:
+                        st.warning(f"Not found: {_mgmt_email}")
+
+            if _mg3.button("🗑️ Delete", key="sub_do_del"):
+                if _mgmt_email and "@" in _mgmt_email:
+                    if _del_sub(_mgmt_email):
+                        st.success(f"Deleted: {_mgmt_email}")
+                    else:
+                        st.warning(f"Not found: {_mgmt_email}")
+
+            if _mg4.button("📧 Resend Welcome", key="sub_do_welcome"):
+                if _mgmt_email and "@" in _mgmt_email:
+                    _sent = _send_welcome_email(_mgmt_email)
+                    if _sent:
+                        from data.analytics import mark_welcome_sent as _mwsm
+                        _mwsm(_mgmt_email)
+                        st.success(f"Welcome email resent to {_mgmt_email}")
+                    else:
+                        st.warning("SMTP not configured — set SMTP_HOST, SMTP_USER, SMTP_PASS in .env")
+
+            # Debug: check if email exists
+            if st.button("🔍 Check email in DB", key="sub_check"):
+                if _mgmt_email:
+                    _found = next((s for s in _subs if s["email"] == _mgmt_email.strip().lower()), None)
+                    if _found:
+                        st.json(_found)
+                    else:
+                        st.info(f"'{_mgmt_email}' not found in subscribers table.")
 
         st.divider()
         st.subheader("📊 Visitor Analytics")
