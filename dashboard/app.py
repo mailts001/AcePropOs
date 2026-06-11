@@ -9,6 +9,7 @@ import json
 import sys
 import os
 from pathlib import Path
+from datetime import date
 
 # Add project root to path and load .env
 ROOT = Path(__file__).parent.parent
@@ -143,9 +144,9 @@ html, body, [class*="css"], button, input, select, textarea {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
-/* ── Layout ── */
+/* ── Layout — top padding clears Streamlit's sticky header (~56px) ── */
 .block-container {
-    padding: 1.25rem 1.5rem 3rem !important;
+    padding: 4rem 1.5rem 3rem !important;
     max-width: 1280px;
 }
 
@@ -266,8 +267,8 @@ hr { opacity: 0.2 !important; }
 
 /* ══════════ MOBILE ══════════ */
 @media (max-width: 768px) {
-    /* Give room below Streamlit's fixed top bar (~3.5rem) */
-    .block-container { padding: 4rem 0.75rem 5rem !important; }
+    /* Extra clearance on mobile — header bar + app bar can stack up to ~6rem */
+    .block-container { padding: 5.5rem 0.75rem 5rem !important; }
     [data-testid="stMetric"] { padding: 0.75rem !important; }
     [data-testid="stMetricValue"] { font-size: 1.15rem !important; }
     /* Stack columns */
@@ -293,7 +294,7 @@ hr { opacity: 0.2 !important; }
 
 /* ══════════ TABLET ══════════ */
 @media (min-width: 769px) and (max-width: 1024px) {
-    .block-container { padding: 1rem 1.25rem !important; }
+    .block-container { padding: 4rem 1.25rem !important; }
     [data-testid="stTabs"] button { font-size: 0.8rem; }
 }
 
@@ -316,7 +317,7 @@ with st.sidebar:
         "Navigate",
         ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel",
          "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO",
-         "📅 MOP Tracker", "🏚️ En-Bloc", "🤝 Partners", "⚙️ Admin"],
+         "📅 MOP Tracker", "🏚️ En-Bloc", "⚖️ Compare", "🤝 Partners", "⚙️ Admin"],
     )
 
     st.divider()
@@ -703,6 +704,34 @@ elif tab_select == "🔍 Valuation":
                     st.info(f"Deal Score: **{result.get('deal_score',0)}/100**")
                 if result.get("explanation"):
                     st.write("**AI Analysis:**", result["explanation"])
+                # PDF export
+                st.divider()
+                if st.button("📄 Download Valuation Report (PDF)", key="pdf_hdb"):
+                    try:
+                        from agents.pdf_report import generate_valuation_report
+                        _ft_key2 = flat_type if flat_type in ("3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE") else "4 ROOM"
+                        _rent_est = _VAL_TOWN_RENT.get(town.upper(), {}).get(_ft_key2, 0) if '_VAL_TOWN_RENT' in dir() else 0
+                        pdf_bytes = generate_valuation_report(
+                            property_address=f"{town} — {flat_type}",
+                            property_type="HDB Resale",
+                            area_sqft=area_sqft,
+                            estimated_value=result.get("estimated_value_sgd", 0),
+                            median_price=result.get("median_price_sgd", 0),
+                            transactions_used=result.get("transactions_used", 0),
+                            asking_price=asking_price,
+                            vs_median_pct=result.get("vs_median_pct", 0),
+                            verdict=result.get("verdict", ""),
+                            ai_analysis=result.get("explanation", ""),
+                            rental_monthly=_rent_est,
+                            gross_yield_pct=round(_rent_est * 12 / result["estimated_value_sgd"] * 100, 2) if _rent_est and result.get("estimated_value_sgd") else 0,
+                        )
+                        st.download_button("💾 Save PDF", pdf_bytes,
+                            file_name=f"PropOS_{town}_{flat_type.replace(' ','_')}_{date.today()}.pdf",
+                            mime="application/pdf", key="dl_pdf_hdb")
+                    except ImportError:
+                        st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
+                    except Exception as _pe:
+                        st.error(f"PDF error: {_pe}")
             else:
                 st.warning(result.get("message", "Insufficient data for this town/flat type"))
 
@@ -811,7 +840,69 @@ elif tab_select == "🔍 Valuation":
                         st.metric("vs District Median", f"{result.get('vs_median_pct',0):+.1f}%", delta=result.get('verdict',''))
                     if result.get("explanation"):
                         st.write("**AI Analysis:**", result["explanation"])
-                else:
+
+                # ── Rental Intelligence for this district ──
+                st.divider()
+                st.subheader(f"🏘️ Rental Market — D{district}")
+                try:
+                    from data.ura_rental_pipeline import get_district_rental_stats
+                    rental_stats = get_district_rental_stats(district)
+                    if rental_stats.get("status") == "ok":
+                        st.caption(f"URA median rental data · {rental_stats.get('latest_quarter','')}")
+                        bed_data = rental_stats.get("by_bedrooms", {})
+                        if bed_data:
+                            import pandas as _rpd
+                            rows = []
+                            for beds, info in sorted(bed_data.items()):
+                                label = f"{beds} BR" if beds not in ("NA","") else "Studio/NA"
+                                med = info.get("median_rent_sgd") or 0
+                                p25 = info.get("p25_rent_sgd") or 0
+                                p75 = info.get("p75_rent_sgd") or 0
+                                # Rough yield: use valuation result if available
+                                est_val = result.get("estimated_value_sgd", 0) if result.get("status") == "ok" else 0
+                                gross_y = round(med * 12 / est_val * 100, 2) if est_val and med else 0
+                                rows.append({"Bedrooms": label, "Median Rent/mo": f"${med:,.0f}" if med else "—",
+                                             "P25": f"${p25:,.0f}" if p25 else "—",
+                                             "P75": f"${p75:,.0f}" if p75 else "—",
+                                             "Est. Gross Yield": f"{gross_y:.2f}%" if gross_y else "—"})
+                            st.dataframe(_rpd.DataFrame(rows), hide_index=True, use_container_width=True)
+                            st.caption("Yield estimated using your selected property value. Actual yield depends on unit size, floor and furnishing.")
+                        else:
+                            st.info("No rental breakdown available for this district yet.")
+                    else:
+                        st.info("Rental median data not yet cached. Run `sync_ura.py` to populate.")
+                except Exception as _re:
+                    st.caption(f"Rental data unavailable: {_re}")
+
+                # ── PDF Export ──
+                st.divider()
+                if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
+                    try:
+                        from agents.pdf_report import generate_valuation_report
+                        pdf_bytes = generate_valuation_report(
+                            property_address=f"District {district}",
+                            property_type=property_type,
+                            area_sqft=area_sqft,
+                            estimated_value=result.get("estimated_value_sgd", 0),
+                            median_price=result.get("median_psf", 0) * area_sqft,
+                            transactions_used=result.get("transactions_used", 0),
+                            asking_price=asking_price,
+                            vs_median_pct=result.get("vs_median_pct", 0),
+                            verdict=result.get("verdict", ""),
+                            ai_analysis=result.get("explanation", ""),
+                            district=district,
+                        )
+                        st.download_button(
+                            "💾 Save PDF", pdf_bytes,
+                            file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
+                            mime="application/pdf", key="dl_pdf_priv"
+                        )
+                    except ImportError:
+                        st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
+                    except Exception as _pe:
+                        st.error(f"PDF error: {_pe}")
+
+            else:
                     st.warning(result.get("message", "Insufficient data"))
 
     else:  # Heatmap
@@ -2378,6 +2469,167 @@ elif tab_select == "🏚️ En-Bloc":
 
 **Key risk:** Minority owners (the 20%) can object but cannot block once 80% threshold is met — subject to STB review.
 """)
+
+# ── Property Comparison Tool ──────────────────────────────────────────────────
+elif tab_select == "⚖️ Compare":
+    st.header("⚖️ Property Comparison")
+    st.markdown(
+        "*Compare up to 3 HDB or private properties side-by-side — valuation, yield, stamp duty and mortgage cost.*"
+    )
+
+    from data.hdb_pipeline import fetch_hdb_resale, get_town_stats
+    from data.stamp_duty import full_stamp_duty
+    from agents.mortgage_agent import calculate as calc_mortgage
+
+    n_props = st.radio("Number of properties to compare", [2, 3], horizontal=True)
+
+    # ── Input columns ──────────────────────────────────────────────────────────
+    cols = st.columns(n_props)
+    props = []
+    for i, col in enumerate(cols):
+        with col:
+            st.subheader(f"Property {i+1}")
+            p_type = st.selectbox("Type", ["HDB Resale", "Private Condo/Apt"], key=f"cmp_type_{i}")
+            if p_type == "HDB Resale":
+                records_all = fetch_hdb_resale()
+                towns_cmp = sorted(set(r['town'] for r in records_all))
+                p_town = st.selectbox("Town", towns_cmp, key=f"cmp_town_{i}",
+                    index=towns_cmp.index("TAMPINES") if "TAMPINES" in towns_cmp else 0)
+                p_flat = st.selectbox("Flat Type", ["3 ROOM","4 ROOM","5 ROOM","EXECUTIVE"], key=f"cmp_flat_{i}")
+                p_area = st.number_input("Area (sqft)", 400, 2000, 1000, key=f"cmp_area_{i}")
+                p_price = st.number_input("Asking Price (SGD)", 100000, 2000000, 550000, step=5000, key=f"cmp_price_{i}")
+                p_district = 0
+            else:
+                p_town = ""
+                p_flat = ""
+                p_district = st.number_input("District", 1, 28, 9, key=f"cmp_dist_{i}")
+                p_area = st.number_input("Area (sqft)", 300, 5000, 1000, key=f"cmp_area_{i}")
+                p_price = st.number_input("Asking Price (SGD)", 300000, 10000000, 1500000, step=10000, key=f"cmp_price_{i}")
+                p_flat = ""
+            p_profile = st.selectbox("Buyer Profile", ["SC", "SPR", "Foreigner"], key=f"cmp_profile_{i}")
+            p_prop_count = st.number_input("Nth property (1=first)", 1, 3, 1, key=f"cmp_cnt_{i}")
+            p_income = st.number_input("Gross Monthly Income (SGD)", 0, 50000, 8000, step=500, key=f"cmp_inc_{i}")
+            props.append({
+                "type": p_type, "town": p_town, "flat": p_flat,
+                "district": p_district, "area": p_area, "price": p_price,
+                "profile": p_profile, "prop_count": p_prop_count, "income": p_income,
+                "label": f"{'D'+str(p_district) if p_district else p_town} {p_flat or 'Condo'} #{i+1}",
+            })
+
+    if st.button("Compare Properties", type="primary"):
+        import pandas as pd
+        st.divider()
+
+        # Build comparison rows
+        metrics = {
+            "Asking Price (SGD)": [],
+            "PSF (SGD)": [],
+            "Estimated Market Value (SGD)": [],
+            "vs Market (%)": [],
+            "BSD (SGD)": [],
+            "ABSD (SGD)": [],
+            "Total Stamp Duty (SGD)": [],
+            "Min Cash Down (SGD)": [],
+            "Monthly Mortgage @3.5% 25yr (SGD)": [],
+            "TDSR (%)": [],
+            "Est. Gross Rental Yield (%)": [],
+        }
+
+        # Benchmark rents by town (HDB)
+        _COMP_RENT = {
+            "ANG MO KIO": {"3 ROOM": 2300,"4 ROOM": 2800,"5 ROOM": 3200,"EXECUTIVE": 3500},
+            "BEDOK": {"3 ROOM": 2200,"4 ROOM": 2700,"5 ROOM": 3100,"EXECUTIVE": 3400},
+            "BISHAN": {"3 ROOM": 2400,"4 ROOM": 3000,"5 ROOM": 3400,"EXECUTIVE": 3700},
+            "BUKIT BATOK": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "BUKIT MERAH": {"3 ROOM": 2600,"4 ROOM": 3200,"5 ROOM": 3700,"EXECUTIVE": 4000},
+            "BUKIT PANJANG": {"3 ROOM": 2000,"4 ROOM": 2500,"5 ROOM": 2900,"EXECUTIVE": 3200},
+            "CENTRAL AREA": {"3 ROOM": 3200,"4 ROOM": 4200,"5 ROOM": 5000,"EXECUTIVE": 5500},
+            "CHOA CHU KANG": {"3 ROOM": 2000,"4 ROOM": 2500,"5 ROOM": 2900,"EXECUTIVE": 3200},
+            "CLEMENTI": {"3 ROOM": 2400,"4 ROOM": 2900,"5 ROOM": 3400,"EXECUTIVE": 3700},
+            "GEYLANG": {"3 ROOM": 2200,"4 ROOM": 2800,"5 ROOM": 3200,"EXECUTIVE": 3500},
+            "HOUGANG": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "JURONG EAST": {"3 ROOM": 2200,"4 ROOM": 2700,"5 ROOM": 3100,"EXECUTIVE": 3400},
+            "JURONG WEST": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "KALLANG/WHAMPOA": {"3 ROOM": 2500,"4 ROOM": 3100,"5 ROOM": 3600,"EXECUTIVE": 3900},
+            "MARINE PARADE": {"3 ROOM": 2600,"4 ROOM": 3200,"5 ROOM": 3700,"EXECUTIVE": 4000},
+            "PASIR RIS": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "PUNGGOL": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "QUEENSTOWN": {"3 ROOM": 2700,"4 ROOM": 3400,"5 ROOM": 3900,"EXECUTIVE": 4200},
+            "SEMBAWANG": {"3 ROOM": 1900,"4 ROOM": 2400,"5 ROOM": 2800,"EXECUTIVE": 3100},
+            "SENGKANG": {"3 ROOM": 2100,"4 ROOM": 2600,"5 ROOM": 3000,"EXECUTIVE": 3300},
+            "SERANGOON": {"3 ROOM": 2300,"4 ROOM": 2900,"5 ROOM": 3300,"EXECUTIVE": 3600},
+            "TAMPINES": {"3 ROOM": 2200,"4 ROOM": 2700,"5 ROOM": 3100,"EXECUTIVE": 3400},
+            "TOA PAYOH": {"3 ROOM": 2400,"4 ROOM": 3000,"5 ROOM": 3500,"EXECUTIVE": 3800},
+            "WOODLANDS": {"3 ROOM": 1900,"4 ROOM": 2400,"5 ROOM": 2800,"EXECUTIVE": 3100},
+            "YISHUN": {"3 ROOM": 2000,"4 ROOM": 2500,"5 ROOM": 2900,"EXECUTIVE": 3200},
+        }
+        # Private condo yield benchmarks by district (gross %)
+        _PRIV_YIELD = {1:3.0,2:3.2,3:3.1,4:3.3,5:3.0,6:2.8,7:3.2,8:3.3,
+                       9:2.9,10:2.8,11:2.9,12:3.3,13:3.4,14:3.4,15:3.3,16:3.2,
+                       17:3.5,18:3.5,19:3.4,20:3.2,21:3.1,22:3.5,23:3.3,
+                       24:3.3,25:3.4,26:3.3,27:3.3,28:3.4}
+
+        prop_labels = []
+        for p in props:
+            prop_labels.append(p["label"])
+            price = p["price"]
+            area = p["area"]
+            psf = round(price / area, 0) if area else 0
+
+            # Stamp duty
+            sd = full_stamp_duty(price, p["profile"], p["prop_count"], p["type"] == "HDB Resale")
+            loan = sd["max_loan_sgd"]
+            cash_down = sd["min_cash_downpayment_sgd"]
+
+            # Mortgage
+            mort = calc_mortgage(price, loan, 25, 3.5, 0)
+            monthly = mort.get("monthly_repayment_sgd", 0)
+            tdsr = round(monthly / p["income"] * 100, 1) if p["income"] else 0
+
+            # Market value estimate (simple)
+            if p["type"] == "HDB Resale" and p["town"]:
+                stats = get_town_stats(p["town"], p["flat"])
+                est_val = stats.get("median_price", price)
+                rent_est = _COMP_RENT.get(p["town"].upper(), {}).get(p["flat"], 0)
+                gross_y = round(rent_est * 12 / price * 100, 2) if rent_est and price else 0
+            else:
+                est_val = price  # use asking price as proxy when no URA data
+                gross_y = _PRIV_YIELD.get(p["district"], 3.2)
+
+            vs_mkt = round((price - est_val) / est_val * 100, 1) if est_val else 0
+
+            metrics["Asking Price (SGD)"].append(f"${price:,.0f}")
+            metrics["PSF (SGD)"].append(f"${psf:,.0f}")
+            metrics["Estimated Market Value (SGD)"].append(f"${est_val:,.0f}")
+            metrics["vs Market (%)"].append(f"{vs_mkt:+.1f}%")
+            metrics["BSD (SGD)"].append(f"${sd['bsd']['total_bsd_sgd']:,.0f}")
+            metrics["ABSD (SGD)"].append(f"${sd['absd']['total_absd_sgd']:,.0f}")
+            metrics["Total Stamp Duty (SGD)"].append(f"${sd['total_stamp_duty_sgd']:,.0f}")
+            metrics["Min Cash Down (SGD)"].append(f"${cash_down:,.0f}")
+            metrics["Monthly Mortgage @3.5% 25yr (SGD)"].append(f"${monthly:,.0f}")
+            metrics["TDSR (%)"].append(f"{tdsr:.1f}%" + (" ⚠️" if tdsr > 55 else ""))
+            metrics["Est. Gross Rental Yield (%)"].append(f"{gross_y:.2f}%")
+
+        # Render as table
+        df_cmp = pd.DataFrame(metrics, index=prop_labels).T
+        df_cmp.index.name = "Metric"
+        st.dataframe(df_cmp, use_container_width=True)
+
+        # Visual: total upfront cost bar chart
+        upfront_costs = []
+        for p in props:
+            sd2 = full_stamp_duty(p["price"], p["profile"], p["prop_count"], p["type"] == "HDB Resale")
+            upfront_costs.append(sd2["total_upfront_cash_sgd"])
+        st.subheader("Total Upfront Cash Required (Down Payment + Stamp Duties)")
+        st.bar_chart(pd.DataFrame({"Upfront Cash (SGD)": upfront_costs}, index=prop_labels))
+
+        # Winner highlights
+        st.subheader("Quick Summary")
+        best_yield_idx = max(range(len(props)), key=lambda i: _PRIV_YIELD.get(props[i]["district"], 3.2) if props[i]["type"] != "HDB Resale" else (_COMP_RENT.get(props[i]["town"].upper(), {}).get(props[i]["flat"], 0) * 12 / props[i]["price"] * 100 if props[i]["price"] else 0))
+        cheapest_idx = min(range(len(props)), key=lambda i: upfront_costs[i])
+        st.success(f"**Lowest upfront cash:** Property {cheapest_idx + 1} ({props[cheapest_idx]['label']}) — SGD {upfront_costs[cheapest_idx]:,.0f}")
+        st.info(f"**Best estimated yield:** Property {best_yield_idx + 1} ({props[best_yield_idx]['label']})")
+        st.caption("TDSR limit is 55%. Red ⚠️ = exceeds limit. Yields are indicative benchmarks, not guaranteed.")
 
 # ── Partners ──────────────────────────────────────────────────────────────────
 elif tab_select == "🤝 Partners":
