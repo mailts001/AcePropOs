@@ -126,7 +126,17 @@ st.set_page_config(
 # ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Premium editorial: serif titles, sans body ── */
+h1, h2, h3,
+[data-testid="stHeading"] {
+    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif !important;
+    letter-spacing: -0.3px;
+}
+h1 { font-size: 1.9rem !important; font-weight: 700 !important; }
+h2 { font-size: 1.4rem !important; font-weight: 600 !important; }
+h3 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
 /* ── Font only — let Streamlit handle all colors so dark/light mode works ── */
 html, body, [class*="css"], button, input, select, textarea {
@@ -306,7 +316,7 @@ with st.sidebar:
         "Navigate",
         ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel",
          "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO",
-         "📅 MOP Tracker", "⚙️ Admin"],
+         "📅 MOP Tracker", "🏚️ En-Bloc", "🤝 Partners", "⚙️ Admin"],
     )
 
     st.divider()
@@ -772,8 +782,11 @@ elif tab_select == "🔍 Valuation":
                 districts_with_data.append((d, s["count"], s["median_psf"]))
 
         if not districts_with_data:
-            st.warning("No URA private transaction data cached yet. URA API is blocked from non-Singapore IPs. Deploy to Singapore VPS to sync data.")
-            st.info("**Workaround:** Use HDB Resale tab or Address Lookup for now. URA private data will be available after VPS deployment.")
+            st.info(
+                "Private transaction data not yet synced.\n\n"
+                "Run once on the VPS to unlock all 28 districts:\n"
+                "```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```"
+            )
         else:
             district_options = {f"D{d} — {cnt} txns, median ${psf:,.0f} PSF": d for d, cnt, psf in districts_with_data}
             col1, col2 = st.columns(2)
@@ -2230,6 +2243,226 @@ elif tab_select == "📅 MOP Tracker":
             if st.button("📊 Calculate ABSD for Next Purchase", key="mop_to_absd"):
                 st.info("Head to 💹 Tools → Stamp Duty Calculator. Set property count to 2 if you own another property.")
 
+# ── En-Bloc Scanner ───────────────────────────────────────────────────────────
+elif tab_select == "🏚️ En-Bloc":
+    st.header("🏚️ En-Bloc Potential Scanner")
+    st.markdown(
+        "*Identify private condominiums and apartments that may be ripe for collective sale. "
+        "Score is based on age, plot ratio headroom, tenure, unit count and district demand.*"
+    )
+
+    from data.enbloc_scanner import score_enbloc_potential, scan_from_ura_cache, get_district_enbloc_history, ENBLOC_HISTORY
+
+    enbloc_tab1, enbloc_tab2, enbloc_tab3 = st.tabs(["🔍 Score a Property", "📋 District Scan", "📜 Historical En-Blocs"])
+
+    with enbloc_tab1:
+        st.subheader("Score En-Bloc Potential")
+        st.caption("Enter details of a development to estimate its collective sale attractiveness.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            eb_project = st.text_input("Development Name", placeholder="e.g. LUCKY TOWERS")
+            eb_district = st.number_input("District (D1–D28)", min_value=1, max_value=28, value=9)
+            eb_year = st.number_input("Completion Year (approx)", min_value=1970, max_value=2020, value=1995)
+            eb_tenure = st.selectbox("Tenure", ["Freehold", "999-year leasehold", "99-year leasehold"])
+        with col2:
+            eb_units = st.number_input("Number of Units", min_value=5, max_value=2000, value=120)
+            eb_site_area = st.number_input("Site Area (sqm)", min_value=500, max_value=50000, value=5000)
+            eb_current_pr = st.number_input("Current Plot Ratio", min_value=0.5, max_value=5.0, value=1.4, step=0.1)
+            eb_allow_pr = st.number_input("Allowable Plot Ratio (URA Master Plan)", min_value=0.5, max_value=5.0, value=2.8, step=0.1)
+
+        if st.button("Calculate En-Bloc Score", type="primary"):
+            if not eb_project:
+                st.warning("Please enter a development name.")
+            else:
+                result = score_enbloc_potential(
+                    project_name=eb_project,
+                    district=eb_district,
+                    completion_year=eb_year,
+                    tenure=eb_tenure,
+                    units=eb_units,
+                    current_plot_ratio=eb_current_pr,
+                    allowable_plot_ratio=eb_allow_pr,
+                    site_area_sqm=eb_site_area,
+                )
+                st.divider()
+                score_col, rating_col = st.columns([1, 2])
+                with score_col:
+                    st.metric("En-Bloc Score", f"{result['score']}/100")
+                    st.metric("Rating", result["rating"])
+                    if result["eligible"]:
+                        st.success(f"✅ Eligible — {result['age_years']} years old (≥20 required)")
+                    else:
+                        st.error(f"❌ Not yet eligible — {result['age_years']} years old (need 20+)")
+                with rating_col:
+                    if result["potential_payout_per_unit_sgd"]:
+                        st.metric(
+                            "Est. Payout Per Unit",
+                            f"SGD {result['potential_payout_per_unit_sgd']:,.0f}",
+                            help="Indicative only. Based on residual land value model with conservative 60% developer margin."
+                        )
+                    st.caption(f"🏢 {result['units']} units · D{result['district']} · {result['tenure']}")
+
+                st.subheader("Scoring Breakdown")
+                for factor, desc, pts in result["factors"]:
+                    icon = "🟢" if pts >= 15 else "🟡" if pts >= 5 else "🔴"
+                    st.markdown(f"{icon} **{factor}** (+{pts} pts) — {desc}")
+
+                st.info(result["note"])
+
+                # District en-bloc history
+                dist_hist = get_district_enbloc_history(eb_district)
+                if dist_hist:
+                    st.subheader(f"Past En-Blocs in D{eb_district}")
+                    import pandas as pd
+                    st.dataframe(
+                        pd.DataFrame(dist_hist)[["project", "year", "price_m", "units"]].rename(columns={
+                            "project": "Development", "year": "Year", "price_m": "Sale Price (SGD M)", "units": "Units"
+                        }),
+                        hide_index=True, use_container_width=True
+                    )
+
+    with enbloc_tab2:
+        st.subheader("District-Wide En-Bloc Scan")
+        st.caption("Scans URA transaction cache to surface developments most likely to be en-bloc candidates.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            scan_min_age = st.slider("Minimum Age (years)", 15, 40, 20)
+        with col2:
+            scan_min_score = st.slider("Minimum Score", 20, 80, 40)
+
+        if st.button("Run Scan", type="primary"):
+            with st.spinner("Scanning URA transaction cache..."):
+                candidates = scan_from_ura_cache(min_age=scan_min_age, min_score=scan_min_score)
+
+            if not candidates:
+                st.info("No URA transaction data cached yet. Run `python scripts/sync_ura.py` on the VPS first to enable this scan.")
+            else:
+                st.success(f"Found {len(candidates)} potential en-bloc candidates")
+                import pandas as pd
+                rows = []
+                for c in candidates:
+                    rows.append({
+                        "Development": c["project"],
+                        "District": f"D{c['district']}",
+                        "Age (yrs)": c["age_years"],
+                        "Tenure": c["tenure"],
+                        "Score": c["score"],
+                        "Rating": c["rating"],
+                    })
+                df = pd.DataFrame(rows)
+                st.dataframe(df, hide_index=True, use_container_width=True)
+                st.caption("⚠️ Age and unit count are estimated from transaction data. Verify against URA REALIS for accuracy.")
+
+    with enbloc_tab3:
+        st.subheader("Notable Singapore En-Bloc Sales")
+        st.caption("Reference database of completed collective sales used in scoring model.")
+        import pandas as pd
+        df_hist = pd.DataFrame(ENBLOC_HISTORY)
+        df_hist = df_hist.rename(columns={
+            "project": "Development", "district": "District",
+            "year": "Sale Year", "price_m": "Price (SGD M)", "units": "Units"
+        })
+        df_hist["District"] = df_hist["District"].apply(lambda x: f"D{x}")
+        df_hist["Price (SGD M)"] = df_hist["Price (SGD M)"].apply(lambda x: f"${x}M")
+        st.dataframe(df_hist, hide_index=True, use_container_width=True)
+        st.markdown("""
+**How en-bloc works:**
+1. A Collective Sale Committee (CSC) is formed by owners
+2. **80% consent** (by share value and strata area) needed to proceed
+3. A reserve price is set and a tender launched
+4. Developer bids; Sale Committee votes to accept
+5. Strata Titles Board approves if 80% threshold met
+6. Completion typically 12–24 months after CSC formation
+
+**Key risk:** Minority owners (the 20%) can object but cannot block once 80% threshold is met — subject to STB review.
+""")
+
+# ── Partners ──────────────────────────────────────────────────────────────────
+elif tab_select == "🤝 Partners":
+    st.header("🤝 Partner with PropOS")
+    st.markdown(
+        "*PropOS is Singapore's AI-powered property intelligence platform — "
+        "reaching buyers, sellers, investors and upgraders at their highest-intent moments.*"
+    )
+
+    st.divider()
+
+    # Value proposition cards
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Monthly Active Users", "Growing", "Early access")
+    p2.metric("Coverage", "HDB + Private", "All 28 districts")
+    p3.metric("Data Sources", "HDB · URA · News", "Real-time")
+
+    st.divider()
+    st.subheader("Partnership Opportunities")
+
+    partner_types = {
+        "🏦 Mortgage Brokers & Banks": {
+            "pitch": "Users actively compare mortgage rates on our platform at the exact moment they decide to buy or refinance. Your packages appear when intent is highest.",
+            "value": "Qualified mortgage leads with property type, loan quantum, and buyer profile already known.",
+            "model": "Lead referral fee or CPC placement.",
+        },
+        "🛡️ Insurance Companies": {
+            "pitch": "Every new mortgage, BTO purchase, and property upgrade triggers an insurance review. Our platform surfaces MRTA/MLTA, term life, and home protection gaps to buyers in real time.",
+            "value": "Pre-qualified leads with loan amount, tenure, and coverage gap already identified.",
+            "model": "Policy referral commission (SGD 500–5,000 per placed policy).",
+        },
+        "🏠 Property Agents & Agencies": {
+            "pitch": "PropOS users are active buyers and sellers in the research phase. Surface your listings and expertise to motivated prospects.",
+            "value": "Seller leads approaching MOP, buyer leads with budget and district preferences known.",
+            "model": "Featured agent listing, lead subscription, or co-marketing.",
+        },
+        "💼 Portfolio & Fund Managers": {
+            "pitch": "Access aggregated Singapore property market intelligence — district-level yield trends, transaction velocity, sentiment index, and macro indicators — for investment and fund reporting.",
+            "value": "Data API access, custom research reports, or white-label intelligence dashboard.",
+            "model": "Data licensing or research retainer.",
+        },
+        "🏗️ Developers & Project Marketing": {
+            "pitch": "Reach buyers actively comparing new launches against resale and BTO alternatives. Feature your project at the decision point.",
+            "value": "Pre-launch interest capture, BTO vs new launch comparison placement.",
+            "model": "Project feature placement or lead generation.",
+        },
+        "⚖️ Legal & Conveyancing Firms": {
+            "pitch": "Every property transaction requires a conveyancing lawyer. Surface your firm at the moment a deal is confirmed.",
+            "value": "Transaction-ready leads with property type and deal value known.",
+            "model": "Lead referral or directory listing.",
+        },
+    }
+
+    for ptype, details in partner_types.items():
+        with st.expander(ptype):
+            st.markdown(f"**Why partner:** {details['pitch']}")
+            st.markdown(f"**What you get:** {details['value']}")
+            st.markdown(f"**Commercial model:** {details['model']}")
+
+    st.divider()
+    st.subheader("📩 Get in Touch")
+    st.markdown("""
+We are selectively onboarding early partners who want to reach Singapore property buyers and investors at high-intent moments.
+
+**Contact:** [mailtsjp@gmail.com](mailto:mailtsjp@gmail.com?subject=PropOS%20Partnership%20Enquiry)
+
+Please include:
+- Your company name and role
+- Which partnership type interests you
+- Rough volume / scale you're working with
+
+We'll respond within 2 business days.
+    """)
+
+    st.info(
+        "💡 **Telegram:** For quick questions, message **@AcePropOS_bot** with your partnership interest "
+        "and we'll connect you with the team."
+    )
+
+    st.divider()
+    st.caption(
+        "PropOS is built on Singapore government open data (HDB Resale data.gov.sg, URA transaction data) "
+        "and AI analysis. All partnership arrangements are subject to MAS and CEA guidelines where applicable."
+    )
+
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
     st.header("⚙️ Admin Panel")
@@ -2289,12 +2522,29 @@ elif tab_select == "⚙️ Admin":
         ]
         import pandas as _pd
         _reg_df = _pd.DataFrame(_REG_SOURCES)
+        from datetime import date
+        _verified_cache = ROOT / "cache" / "admin_verified.json"
+        _verified_log = {}
+        if _verified_cache.exists():
+            try:
+                _verified_log = json.load(open(_verified_cache))
+            except Exception:
+                pass
+
         for _, row in _reg_df.iterrows():
-            _col1, _col2, _col3 = st.columns([3, 2, 2])
+            _col1, _col2, _col3, _col4 = st.columns([3, 2, 1, 1])
             _col1.markdown(f"**{row['name']}**  \n`{row['file']}`")
-            _col2.markdown(f"✅ Verified: {row['verified']}")
-            _col3.markdown(f"[Check official source ↗]({row['url']})")
-        st.caption("After verifying a change, update the file and change the verified date above.")
+            _last_check = _verified_log.get(row["name"], row["verified"])
+            _col2.markdown(f"✅ Verified: {_last_check}")
+            _col3.markdown(f"[Open source ↗]({row['url']})")
+            if _col4.button("Mark verified ✓", key=f"verify_{row['name'][:15]}"):
+                _verified_log[row["name"]] = str(date.today())
+                import json as _json2
+                _verified_cache.parent.mkdir(parents=True, exist_ok=True)
+                _verified_cache.write_text(_json2.dumps(_verified_log))
+                st.success(f"Marked '{row['name']}' verified today.")
+                st.rerun()
+        st.caption("Click 'Open source' to check the official page, then 'Mark verified ✓' to log today's date. Update the code file if rates changed.")
 
         st.divider()
         st.subheader("🔄 Data Sync")
