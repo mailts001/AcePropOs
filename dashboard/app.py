@@ -465,59 +465,33 @@ with st.sidebar:
         alias_key = _NAV_ALIASES.get(pg, pg)
         cnt = _page_counts.get(alias_key, _page_counts.get(pg, 0))
         if cnt >= 50: return f"{pg} 🔥"
-        if cnt >= 5:  return f"{pg}  ({cnt}👁)"    # short form — won't get clipped
+        if cnt >= 5:  return f"{pg}  ({cnt}👁)"
         return pg
 
-    # ── Tracking callback — fires exactly once per navigation change ──────────
-    def _on_page_change():
-        """on_change callback for nav radios — guarantees correct page is tracked."""
-        _cur_cat = st.session_state.get("nav_cat", list(NAV.keys())[0])
-        _cur_pg  = st.session_state.get(f"nav_page_{_cur_cat}", NAV[_cur_cat][0])
-        _alias   = _NAV_ALIASES.get(_cur_pg, _cur_pg)
-        try:
-            from data.analytics import track_pageview as _tpv
-            _tpv(page=_alias,
-                 session_id=st.session_state.get("session_id", ""),
-                 ip=st.session_state.get("_visitor_ip", ""))
-        except Exception:
-            pass
-
     st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
+    # NO on_change — on_change callbacks interact badly with bidirectional
+    # custom components (streamlit-folium) which trigger their own reruns.
+    # Tracking is handled below via per-page session state flags instead.
     nav_cat = st.radio(
         "Section",
         list(NAV.keys()),
         label_visibility="collapsed",
         key="nav_cat",
-        on_change=_on_page_change,
     )
 
     pages = NAV[nav_cat]
 
     if len(pages) == 1:
         nav_page = pages[0]
-        # Ensure single-page categories still track on first visit
-        _sp_key = f"_tracked_single_{nav_page}"
-        if not st.session_state.get(_sp_key):
-            st.session_state[_sp_key] = True
-            try:
-                from data.analytics import track_pageview as _tpv_sp
-                _tpv_sp(page=_NAV_ALIASES.get(nav_page, nav_page),
-                        session_id=st.session_state.get("session_id", ""),
-                        ip=st.session_state.get("_visitor_ip", ""))
-            except Exception:
-                pass
     else:
         st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin:6px 0 2px 0'>Sub Menus</p>", unsafe_allow_html=True)
-        # KEY: store clean page name as value, format_func only affects display label
-        # unique key per category so selection resets cleanly on category switch
-        # on_change callback fires EXACTLY when user changes selection → no tracking swap
         nav_page = st.radio(
             "Page",
             pages,
             format_func=_label,
             label_visibility="collapsed",
             key=f"nav_page_{nav_cat}",
-            on_change=_on_page_change,
+            # NO on_change here — see comment on nav_cat above
         )
 
     # Resolve alias so existing elif chain keeps working unchanged
@@ -577,9 +551,7 @@ with st.sidebar:
 
     st.caption("v1.0 · acepropos.duckdns.org")
 
-# ── Session init & IP resolution ─────────────────────────────────────────────
-# Tracking now fires via on_change callbacks on nav radios (see sidebar above).
-# This guarantees exactly one pageview recorded per navigation, with no swap bug.
+# ── Session init & page tracking ─────────────────────────────────────────────
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())[:12]
 _session_id = st.session_state["session_id"]
@@ -587,8 +559,7 @@ _session_id = st.session_state["session_id"]
 try:
     from data.analytics import ensure_schema
     ensure_schema()
-    # Resolve real visitor IP from nginx proxy headers, store in session state
-    # so the on_change callback can read it
+    # Resolve real visitor IP once per session (nginx proxy headers)
     if "_visitor_ip" not in st.session_state:
         _headers = st.context.headers if hasattr(st, "context") else {}
         _visitor_ip = (
@@ -599,12 +570,16 @@ try:
         st.session_state["_visitor_ip"] = _visitor_ip
     else:
         _visitor_ip = st.session_state["_visitor_ip"]
-    # Track initial page load (first time session sees this page)
-    _first_view_key = f"_fv_{_session_id}_{tab_select}"
-    if not st.session_state.get(_first_view_key):
-        st.session_state[_first_view_key] = True
-        from data.analytics import track_pageview as _tpv_init
-        _tpv_init(page=tab_select, session_id=_session_id, ip=_visitor_ip)
+
+    # Track page views using a per-page flag in session state.
+    # Key = session_id + page name → fires ONCE per page per session.
+    # Immune to folium reruns, widget rerenders, or any other reruns because
+    # the flag is already set after the first genuine navigation.
+    _track_key = f"_pv_{_session_id}_{tab_select}"
+    if not st.session_state.get(_track_key):
+        st.session_state[_track_key] = True
+        from data.analytics import track_pageview as _tpv
+        _tpv(page=tab_select, session_id=_session_id, ip=_visitor_ip)
 except Exception:
     _visitor_ip = ""
 
@@ -3362,7 +3337,11 @@ elif tab_select == "🗺️ MRT Map":
                 st.caption(f"Transaction overlay error: {_te}")
 
         folium.LayerControl().add_to(m)
-        st_folium(m, height=520, use_container_width=True)
+        # returned_objects=[] → map sends NO data back to Streamlit on load/interaction.
+        # This prevents st_folium from triggering reruns that reset the nav radio state.
+        # key= stabilises the component identity so Streamlit doesn't re-mount it.
+        st_folium(m, height=520, use_container_width=True,
+                  returned_objects=[], key="propos_main_map")
 
         # Legend
         _legend_items = []
