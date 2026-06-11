@@ -351,6 +351,7 @@ with st.sidebar:
         "🏗️ BTO Pipeline": "🏗️ BTO",
     }
 
+    st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
     nav_cat = st.radio(
         "Section",
         list(NAV.keys()),
@@ -361,6 +362,7 @@ with st.sidebar:
     if len(pages) == 1:
         nav_page = pages[0]
     else:
+        st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin:6px 0 2px 0'>Sub Menus</p>", unsafe_allow_html=True)
         nav_page = st.radio(
             "Page",
             pages,
@@ -954,7 +956,87 @@ elif tab_select == "🔍 Valuation":
                     st.warning(result.get("message", "Insufficient data"))
 
     else:  # Heatmap
-        st.subheader("🗺️ HDB Market Intelligence — All Towns")
+        heatmap_type = st.radio("Heatmap type", ["🏠 HDB — All Towns", "🏢 Private — All Districts"], horizontal=True)
+
+        if heatmap_type == "🏢 Private — All Districts":
+            st.subheader("🗺️ Private Property Intelligence — All Districts")
+            from data.ura_pipeline import get_district_stats
+            import pandas as pd
+            # District name map
+            _DIST_NAMES = {
+                1:"Boat Quay/Raffles Place",2:"Chinatown/Tanjong Pagar",3:"Alexandra/Commonwealth",
+                4:"Harbourfront/Telok Blangah",5:"Buona Vista/West Coast",6:"City Hall/Clarke Quay",
+                7:"Middle Road/Golden Mile",8:"Farrer Park/Serangoon Rd",9:"Orchard/River Valley",
+                10:"Tanglin/Holland/Bukit Timah",11:"Newton/Novena",12:"Balestier/Toa Payoh",
+                13:"Macpherson/Braddell",14:"Geylang/Eunos",15:"Katong/Joo Chiat/Marine Parade",
+                16:"Bedok/Upper East Coast",17:"Loyang/Changi",18:"Tampines/Pasir Ris",
+                19:"Serangoon/Hougang",20:"Ang Mo Kio/Bishan",21:"Clementi/Upper Bukit Timah",
+                22:"Jurong",23:"Hillview/Bukit Batok",24:"Lim Chu Kang/Tengah",
+                25:"Admiralty/Woodlands",26:"Mandai/Upper Thomson",27:"Sembawang/Yishun",
+                28:"Seletar/Punggol",
+            }
+            # Gross yield benchmarks by district
+            _D_YIELD = {1:3.0,2:3.2,3:3.1,4:3.3,5:3.0,6:2.8,7:3.2,8:3.3,
+                        9:2.9,10:2.8,11:2.9,12:3.3,13:3.4,14:3.4,15:3.3,16:3.2,
+                        17:3.5,18:3.5,19:3.4,20:3.2,21:3.1,22:3.5,23:3.3,
+                        24:3.3,25:3.4,26:3.3,27:3.3,28:3.4}
+
+            with st.spinner("Loading private transaction data..."):
+                hm_priv_data = []
+                for d in range(1, 29):
+                    s = get_district_stats(d)
+                    if s.get("count", 0) >= 5:
+                        med_psf = s["median_psf"]
+                        yield_b = _D_YIELD.get(d, 3.2)
+                        # Est monthly rent from yield benchmark × median price for 1000sqft unit
+                        est_rent = round(med_psf * 1000 * yield_b / 12 / 100, -1)
+                        hm_priv_data.append({
+                            "District": f"D{d}",
+                            "Name": _DIST_NAMES.get(d, ""),
+                            "Median PSF": med_psf,
+                            "P25 PSF": s.get("p25_psf", 0),
+                            "P75 PSF": s.get("p75_psf", 0),
+                            "Transactions": s["count"],
+                            "Est Rent 1000sqft": int(est_rent),
+                            "Gross Yield %": yield_b,
+                            "Net Yield %": round(yield_b - 1.5, 1),
+                        })
+
+            if not hm_priv_data:
+                st.info("No private transaction data cached yet. Run `sync_ura.py` on the VPS.")
+            else:
+                df_priv = pd.DataFrame(hm_priv_data)
+                ph_tab1, ph_tab2, ph_tab3 = st.tabs(["💰 PSF by District", "📈 Yield & Rent", "📊 Full Table"])
+                with ph_tab1:
+                    st.caption("Median PSF across all private residential transactions. Sorted highest to lowest.")
+                    st.bar_chart(df_priv.set_index("District")["Median PSF"])
+                    st.caption("Higher PSF = more expensive district. CCR (D1–D11) typically commands premium over OCR (D17–D28).")
+                with ph_tab2:
+                    pc1, pc2 = st.columns(2)
+                    with pc1:
+                        st.subheader("Est. Monthly Rent — 1,000 sqft unit")
+                        st.bar_chart(df_priv.set_index("District")["Est Rent 1000sqft"])
+                        st.caption("Estimate: median PSF × 1,000 sqft × gross yield ÷ 12")
+                    with pc2:
+                        st.subheader("Gross Rental Yield (%)")
+                        st.bar_chart(df_priv.set_index("District")["Gross Yield %"])
+                        st.caption("OCR districts (D17–D28) typically yield more than prime CCR.")
+                with ph_tab3:
+                    st.dataframe(
+                        df_priv[["District","Name","Median PSF","P25 PSF","P75 PSF","Transactions","Est Rent 1000sqft","Gross Yield %","Net Yield %"]],
+                        hide_index=True, use_container_width=True
+                    )
+                    st.caption("Net yield estimated after ~1.5% annual holding costs (maintenance, vacancy, property tax). Not financial advice.")
+
+        else:
+        # ── HDB Heatmap ────────────────────────────────────────────────────────
+        # (original HDB heatmap below)
+            pass
+        if heatmap_type == "🏠 HDB — All Towns":
+        # ─────────────────────────────────────────────────────────────────
+        #  original HDB heatmap code (indented one level) starts here
+        # ─────────────────────────────────────────────────────────────────
+            st.subheader("🗺️ HDB Market Intelligence — All Towns")
         from data.hdb_pipeline import fetch_hdb_resale, get_town_stats
         from collections import defaultdict, Counter
         import pandas as pd
@@ -1808,6 +1890,64 @@ elif tab_select == "🏦 Mortgage":
             if st.button("💬 Check My Mortgage Protection", key="mrta_from_aff"):
                 st.info("Head to the 🛡️ Insurance tab → Analyse to build your full insurance portfolio including MRTA/MLTA coverage.")
 
+    # ── Mortgage Broker Referral ──────────────────────────────────────────────
+    st.divider()
+    with st.expander("🏦 Get matched with a licensed mortgage broker — free, no obligation", expanded=False):
+        st.markdown("""
+**Why use a broker instead of going direct to a bank?**
+- Brokers compare **all major banks simultaneously** (DBS, OCBC, UOB, Maybank, SCB and more)
+- They negotiate on your behalf — often securing rates 0.1–0.3% lower than walk-in
+- **No cost to you** — brokers are paid by the bank when your loan is approved
+- Pre-qualify before committing to an OTP, avoiding last-minute loan rejections
+        """)
+        st.subheader("Request a Free Mortgage Consultation")
+        br_col1, br_col2 = st.columns(2)
+        with br_col1:
+            br_name = st.text_input("Your name", key="br_name", placeholder="Lee Wei Ming")
+            br_email = st.text_input("Email address", key="br_email", placeholder="you@email.com")
+            br_phone = st.text_input("Mobile (optional)", key="br_phone", placeholder="+65 9xxx xxxx")
+        with br_col2:
+            br_loan = st.number_input("Loan amount needed (SGD)", 100000, 5000000, 500000, step=50000, key="br_loan")
+            br_prop_type = st.selectbox("Property type", ["HDB", "Private Condo/Apt", "EC", "Landed"], key="br_ptype")
+            br_timeline = st.selectbox("Timeline", ["Within 1 month", "1–3 months", "3–6 months", "Just exploring"], key="br_timeline")
+        br_notes = st.text_area("Any other details (optional)", key="br_notes", placeholder="e.g. currently on OCBC package expiring Oct 2026, looking to refinance...")
+
+        if st.button("📩 Submit Referral Request", type="primary", key="broker_submit"):
+            if not br_name or not br_email:
+                st.warning("Please enter at least your name and email.")
+            else:
+                import asyncio
+                async def _send_broker_lead():
+                    try:
+                        from telegram import Bot
+                        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                        admin_id = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
+                        if bot_token and admin_id:
+                            bot = Bot(token=bot_token)
+                            msg = (
+                                f"🏦 *New Broker Referral Lead*\n\n"
+                                f"👤 Name: {br_name}\n"
+                                f"📧 Email: {br_email}\n"
+                                f"📱 Phone: {br_phone or '—'}\n"
+                                f"💰 Loan: SGD {br_loan:,.0f}\n"
+                                f"🏠 Type: {br_prop_type}\n"
+                                f"⏱ Timeline: {br_timeline}\n"
+                                f"📝 Notes: {br_notes or '—'}"
+                            )
+                            await bot.send_message(chat_id=admin_id, text=msg, parse_mode="Markdown")
+                    except Exception:
+                        pass
+                try:
+                    asyncio.run(_send_broker_lead())
+                except Exception:
+                    pass
+                st.success(
+                    f"✅ Thank you {br_name}! Your request has been received. "
+                    "A licensed mortgage broker will contact you within 1 business day. "
+                    "This service is completely free — no obligation to proceed."
+                )
+                st.balloons()
+
 # ── Tools (Stamp Duty + ROI + Affordability) ──────────────────────────────────
 elif tab_select == "💹 Tools":
     from data.stamp_duty import full_stamp_duty, calc_ssd, ABSD_RATES
@@ -2016,29 +2156,33 @@ elif tab_select == "💹 Tools":
 elif tab_select == "🔔 Watchlist":
     st.header("🔔 Property Watchlist & Price Alerts")
 
-    with st.expander("ℹ️ How to use Watchlist alerts", expanded=False):
+    with st.expander("ℹ️ How Watchlist alerts work — read this first", expanded=False):
         st.markdown("""
-**What it does**
+**What PropOS Watchlist monitors**
 
-Set up a saved search (e.g. *Tampines 4-room under SGD 600,000*). Every hour, PropOS automatically scans the latest HDB resale transactions and alerts you when a matching deal appears — especially ones priced below the market median.
+PropOS tracks **confirmed resale transactions** from official government data — not live listings on PropertyGuru or 99.co. This means:
+
+| What it IS | What it is NOT |
+|---|---|
+| ✅ Real sold prices (what buyers actually paid) | ❌ Live asking prices from agents |
+| ✅ Alerts when a unit matching your criteria has SOLD below your target | ❌ "This unit is for sale now" notifications |
+| ✅ Useful for knowing the real market clearing price | ❌ Direct link to available listings |
+
+**Why confirmed transactions are more valuable than listings:**
+Asking prices on portals are often inflated by 5–15%. Knowing what similar units *actually sold for* tells you your real negotiation anchor.
 
 **Step-by-step:**
-1. **Enter your Telegram ID** below (get it by messaging @userinfobot on Telegram)
-2. Go to **➕ Add Watch** → set your town, flat type, max price, and alert threshold
-3. Save it — PropOS checks automatically every hour
-4. You'll receive a Telegram message via **@askAceBot** when a match is found
+1. **Enter your Telegram ID** below (message @userinfobot on Telegram to get it)
+2. Go to **➕ Add Watch** → set your town, flat type, max price, and threshold
+3. PropOS checks automatically on your chosen frequency
+4. Alert via **@AcePropOS_bot** when a matching sold transaction appears
 
-**Alert threshold explained**
+**Alert threshold**
+- **0%** → any transaction in your price range
+- **5%** → only when sold price is 5%+ below town median (genuine deals)
+- **10%+** → only the sharpest below-market transactions
 
-- Set to **0%** → alert on any transaction matching your criteria
-- Set to **5%** → only alert when PSF is 5% or more below the town median (deals only)
-- Set to **10%+** → only the sharpest deals
-
-**Your Telegram ID**
-
-Open Telegram → message **@userinfobot** → it replies with your numeric ID (e.g. `1245366658`). Enter that below to receive alerts.
-
-> ⚠️ Currently covers **HDB resale transactions** only. Private condo watchlist coming soon.
+> 📊 **HDB resale** data updates daily from data.gov.sg. **Private condo** alerts use URA transaction data (updated weekly).
         """)
 
     init_watchlist_db()
@@ -2049,6 +2193,26 @@ Open Telegram → message **@userinfobot** → it replies with your numeric ID (
         placeholder="e.g. 1245366658",
         key="wl_user_id",
     )
+
+    # ── Freemium tier status banner ──────────────────────────────────────────────
+    if _user_id:
+        try:
+            from data.freemium import tier_info, UPGRADE_CTA
+            _tier = tier_info(_user_id)
+            _used = _tier["alerts_used_this_week"]
+            _limit = _tier["watchlist_alerts_per_week"]
+            if _tier["tier"] == "pro":
+                st.success(f"✅ **PropOS Pro** — unlimited alerts active")
+            else:
+                _pct = min(100, int(_used / max(_limit, 1) * 100))
+                if _used >= _limit:
+                    st.error(f"🔒 **Free tier limit reached** ({_used}/{_limit} alerts this week). {UPGRADE_CTA}")
+                elif _used >= _limit - 1:
+                    st.warning(f"⚠️ **{_used}/{_limit} alerts used this week** — 1 remaining. Upgrade to Pro for unlimited.")
+                else:
+                    st.info(f"🆓 **Free tier** — {_used}/{_limit} alerts used this week · [Upgrade to Pro →](https://t.me/AcePropOS_bot)")
+        except Exception:
+            pass
 
     wl_tab1, wl_tab2, wl_tab3 = st.tabs(["➕ Add Watch", "📋 My Watches", "🔍 Run Check Now"])
 
@@ -2793,6 +2957,28 @@ elif tab_select == "⚙️ Admin":
             save_mode(new_mode)
             st.success(f"Mode switched to **{new_mode}**")
             st.rerun()
+
+        st.divider()
+        st.subheader("👥 User Tier Management")
+        from data.freemium import set_tier, tier_info, ensure_schema
+        ensure_schema()
+        ut_col1, ut_col2, ut_col3 = st.columns(3)
+        with ut_col1:
+            ut_id = st.text_input("Telegram ID", key="ut_id", placeholder="1234567890")
+        with ut_col2:
+            ut_tier = st.selectbox("Tier", ["pro", "free"], key="ut_tier")
+        with ut_col3:
+            ut_months = st.number_input("Months (Pro)", 1, 24, 1, key="ut_months")
+        if st.button("Update Tier", key="ut_save"):
+            if ut_id:
+                set_tier(ut_id, ut_tier, ut_months if ut_tier == "pro" else 0)
+                st.success(f"✅ {ut_id} → {ut_tier} ({ut_months} months)")
+        if ut_id:
+            try:
+                _ti = tier_info(ut_id)
+                st.caption(f"Current: **{_ti['tier'].upper()}** · {_ti['alerts_used_this_week']} alerts this week · expires {_ti.get('expires_at','—')}")
+            except Exception:
+                pass
 
         st.divider()
         st.subheader("💰 Token Cost Tracker")
