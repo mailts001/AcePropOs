@@ -304,8 +304,41 @@ with st.sidebar:
     st.divider()
     tab_select = st.radio(
         "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO", "⚙️ Admin"],
+        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel",
+         "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO",
+         "📅 MOP Tracker", "⚙️ Admin"],
     )
+
+    st.divider()
+    with st.expander("📖 Terms Explained"):
+        st.markdown("""
+**Property**
+- **PSF** — Price per square foot. Lower = cheaper relative to size.
+- **HDB** — Housing Development Board. Singapore public housing.
+- **MOP** — Minimum Occupation Period. HDB owners must live in their flat for 5 years before selling or renting the whole unit.
+- **BTO** — Build-to-Order. New HDB flats balloted directly from HDB, usually 20–30% cheaper than resale.
+- **En-bloc** — Collective sale where all owners sell to a developer at a premium.
+- **Leasehold / Freehold** — Leasehold = 99-yr lease from government. Freehold = no expiry.
+
+**Finance**
+- **BSD** — Buyer's Stamp Duty. Paid by all buyers on every property purchase.
+- **ABSD** — Additional BSD. Extra tax for 2nd+ properties or foreigners.
+- **SSD** — Seller's Stamp Duty. Applies if you sell within 3 years of buying.
+- **TDSR** — Total Debt Servicing Ratio. MAS rule: all loan repayments ≤ 55% of gross income.
+- **MSR** — Mortgage Servicing Ratio. For HDB/EC only: mortgage ≤ 30% of gross income.
+- **SORA** — Singapore Overnight Rate Average. Benchmark rate that bank mortgage packages are pegged to.
+- **LTV** — Loan-to-Value. Max % of property price you can borrow (75% private, 80% HDB first loan).
+
+**Insurance**
+- **Mortgage Protection (MRTA)** — Mortgage Reducing Term Assurance. Pays off your remaining loan if you pass away or become critically ill. Coverage reduces as loan is paid down. One-time premium ~SGD 2,000–5,000.
+- **Life & Mortgage Insurance (MLTA)** — Mortgage Level Term Assurance. Fixed payout regardless of remaining loan. More flexible — family keeps the difference. Higher premium than MRTA.
+- **Term Life** — Pays a lump sum if you pass away within the policy term.
+- **Critical Illness (CI)** — Pays lump sum on diagnosis of major illnesses (cancer, stroke, heart attack).
+- **Total & Permanent Disability (TPD)** — Pays if you cannot work permanently.
+- **Fire Insurance** — Covers the structure of your property (required for HDB).
+- **Home Contents** — Covers furniture, appliances, and belongings inside your home.
+        """)
+    st.caption("v1.0 · acepropos.duckdns.org")
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
 if tab_select == "🏠 Address Lookup":
@@ -1277,11 +1310,11 @@ elif tab_select == "🛡️ Insurance":
                 has_fire = c6.checkbox("Fire Insurance?", value=True, key=f"ins_fire_{i}")
                 has_contents = c7.checkbox("Contents Insured?", key=f"ins_cont_{i}")
                 is_rented = c8.checkbox("Rented Out?", key=f"ins_rent_{i}")
-                has_mrta = c9.checkbox("MRTA/MLTA?", key=f"ins_mrta_{i}") if has_mortgage else False
+                has_mrta = c9.checkbox("Mortgage Protection?", help="MRTA/MLTA — covers your loan if you pass away or become critically ill", key=f"ins_mrta_{i}") if has_mortgage else False
 
                 mrta_coverage = 0
                 if has_mrta and has_mortgage:
-                    mrta_coverage = st.number_input("MRTA/MLTA Coverage (SGD)", 0, 5000000, outstanding_loan, step=10000, key=f"ins_mrta_cov_{i}")
+                    mrta_coverage = st.number_input("Mortgage Protection Coverage (SGD)", 0, 5000000, outstanding_loan, step=10000, key=f"ins_mrta_cov_{i}")
 
                 properties.append({
                     "name": name, "value_sgd": value, "type": prop_type,
@@ -1551,8 +1584,8 @@ elif tab_select == "🏦 Mortgage":
                 # MRTA alert
                 if "insurance_alert" in refi:
                     alert = refi["insurance_alert"]
-                    st.warning(f"🛡️ **MRTA Review Recommended**\n\n{alert['message']}")
-                    if st.button("💬 Get MRTA Quote", key="mrta_from_refi"):
+                    st.warning(f"🛡️ **Mortgage Protection Review**\n\n{alert['message']}")
+                    if st.button("💬 Get Mortgage Protection Quote", key="mrta_from_refi"):
                         st.switch_page = None  # navigation placeholder
                         st.info("Head to the 🛡️ Insurance tab to run a full MRTA analysis for your new loan.")
 
@@ -1616,11 +1649,11 @@ elif tab_select == "🏦 Mortgage":
             st.markdown("### 🛡️ Protect Your Mortgage")
             st.markdown(
                 f"On a SGD {aff_loan:,.0f} loan over {aff_tenure} years, "
-                f"an MRTA policy typically costs **SGD 2,000–5,000** as a one-time premium "
+                f"a Mortgage Protection policy typically costs **SGD 2,000–5,000** as a one-time premium "
                 f"and pays off your outstanding mortgage if you pass away or become critically ill. "
                 f"Your family keeps the home — not just the debt."
             )
-            if st.button("💬 Run MRTA Analysis", key="mrta_from_aff"):
+            if st.button("💬 Check My Mortgage Protection", key="mrta_from_aff"):
                 st.info("Head to the 🛡️ Insurance tab → Analyse to build your full insurance portfolio including MRTA/MLTA coverage.")
 
 # ── Tools (Stamp Duty + ROI + Affordability) ──────────────────────────────────
@@ -1766,7 +1799,7 @@ elif tab_select == "💹 Tools":
             st.divider()
             st.markdown("### 🛡️ Protect this investment")
             st.markdown(
-                f"With SGD {loan:,.0f} in mortgage financing, an MRTA policy ensures "
+                f"With SGD {loan:,.0f} in mortgage financing, a Mortgage Protection policy ensures "
                 f"your family keeps this investment property — not just the liability — if you're unable to service the loan. "
                 f"Typical cost: SGD 2,000–5,000 one-time premium."
             )
@@ -2059,9 +2092,9 @@ elif tab_select == "🏗️ BTO":
 
             # MRTA nudge for new flat buyers
             st.divider()
-            st.markdown("### 🛡️ New BTO buyers: don't forget MRTA")
+            st.markdown("### 🛡️ New BTO buyers: protect your mortgage")
             st.markdown(
-                "If you're taking an HDB or bank loan for your BTO, an MRTA policy ensures your family "
+                "If you're taking an HDB or bank loan for your BTO, a Mortgage Protection policy ensures your family "
                 "won't lose the flat if you pass away before the loan is paid off. "
                 "One-time premium typically SGD 2,000–5,000."
             )
@@ -2084,6 +2117,118 @@ elif tab_select == "🏗️ BTO":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed: {e}")
+
+# ── MOP Tracker ───────────────────────────────────────────────────────────────
+elif tab_select == "📅 MOP Tracker":
+    from data.mop_tracker import calculate_mop, mop_financial_snapshot
+    from datetime import date
+    import pandas as _pd
+
+    st.header("📅 MOP Tracker")
+    st.caption("Minimum Occupation Period — HDB owners must stay 5 years before selling the whole flat or buying another subsidised property.")
+
+    mop_tab1, mop_tab2 = st.tabs(["⏱️ MOP Status", "💰 Sell or Hold?"])
+
+    with mop_tab1:
+        st.subheader("When does my MOP end?")
+        st.info("The MOP clock starts from the **date you collect your keys** (Vacant Possession date shown on your HDB letter), not the purchase or signing date.")
+
+        m1, m2 = st.columns(2)
+        mop_date_input = m1.date_input(
+            "Key collection date (Vacant Possession date)",
+            value=date(2020, 6, 15),
+            min_value=date(2000, 1, 1),
+            max_value=date.today(),
+            key="mop_date",
+        )
+        mop_flat_type = m2.selectbox("Flat type", ["BTO", "Resale HDB", "DBSS", "EC (Executive Condo)"], key="mop_flat")
+
+        mop = calculate_mop(mop_date_input, mop_flat_type)
+
+        st.divider()
+        if mop["status"] == "completed":
+            st.success(f"✅ **MOP Completed** — You are free to sell on the open market!")
+            st.balloons()
+        elif mop["approaching_mop"]:
+            st.warning(f"⏳ **Approaching MOP** — {mop['months_remaining']} months remaining ({mop['mop_end_date']})")
+            st.info("💡 Start preparing now: engage a property agent 3 months before, get a valuation, and check resale levy rules if you plan to buy another HDB.")
+        else:
+            st.info(f"🔒 MOP in progress — ends **{mop['mop_end_date']}**")
+
+        # Progress bar
+        st.markdown(f"**Progress: {mop['pct_complete']}%**")
+        st.progress(mop["pct_complete"] / 100)
+
+        p1, p2, p3 = st.columns(3)
+        p1.metric("MOP End Date", mop["mop_end_date"])
+        p2.metric("Months Remaining", mop["months_remaining"] if mop["status"] != "completed" else "Done")
+        p3.metric("Time Elapsed", f"{mop['years_elapsed']}y {mop['months_elapsed']}m")
+
+        if mop["status"] == "completed":
+            st.divider()
+            st.markdown("**What you can do now:**")
+            for opt in mop["post_mop_options"]:
+                st.markdown(f"✅ {opt}")
+
+        st.divider()
+        with st.expander("📖 MOP Rules & Common Questions"):
+            for note in mop["notes"]:
+                st.markdown(f"• {note}")
+
+    with mop_tab2:
+        st.subheader("Should I sell now or wait?")
+        st.caption("Model your net proceeds after CPF refund, outstanding loan, and compare to holding.")
+
+        f1, f2 = st.columns(2)
+        snap_purchase = f1.number_input("Original purchase price (SGD)", value=350_000, step=10_000, key="snap_purchase")
+        snap_cpf = f1.number_input("Total CPF used to date (SGD)", value=120_000, step=5_000, key="snap_cpf",
+                                    help="Principal + all monthly deductions. Check via CPF website → My Statements.")
+        snap_loan = f1.number_input("Outstanding loan (SGD)", value=180_000, step=5_000, key="snap_loan")
+        snap_mkt = f2.number_input("Estimated current market value (SGD)", value=520_000, step=10_000, key="snap_mkt",
+                                    help="Use Address Lookup tab to get a valuation estimate.")
+        snap_key_date = f2.date_input("Key collection date", value=date(2020, 6, 15),
+                                       min_value=date(2000, 1, 1), max_value=date.today(), key="snap_key")
+
+        if st.button("Calculate Net Proceeds", type="primary", key="snap_btn"):
+            snap = mop_financial_snapshot(snap_purchase, snap_cpf, snap_mkt, snap_loan, snap_key_date)
+
+            st.divider()
+            if snap["warning"]:
+                st.error(f"🔒 {snap['warning']}")
+            else:
+                st.success("✅ MOP completed — legally able to sell.")
+
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Market Value", f"SGD {snap_mkt:,.0f}")
+            s2.metric("Capital Gain", f"SGD {snap['capital_gain_sgd']:,.0f}", f"{snap['gain_pct']:+.1f}%")
+            s3.metric("Annual Appreciation", f"{snap['annual_appreciation_pct']}%/yr")
+            s4.metric("Net Cash in Hand", f"SGD {snap['net_cash_in_hand_sgd']:,.0f}",
+                      help="After repaying loan + CPF with accrued interest")
+
+            st.divider()
+            st.markdown("**How net cash is calculated:**")
+            flow_rows = [
+                {"Item": "Sale proceeds", "SGD": f"{snap_mkt:,.0f}"},
+                {"Item": "Less: Outstanding loan", "SGD": f"({snap['outstanding_loan_sgd']:,.0f})"},
+                {"Item": "Less: CPF principal to refund", "SGD": f"({snap['cpf_used_sgd']:,.0f})"},
+                {"Item": "Less: CPF accrued interest (2.5%/yr)", "SGD": f"({snap['cpf_accrued_interest_sgd']:,.0f})"},
+                {"Item": "Less: Agent commission (~1–2%)", "SGD": f"({snap_mkt*0.015:,.0f})"},
+                {"Item": "**Net cash proceeds**", "SGD": f"**{snap['net_cash_in_hand_sgd'] - snap_mkt*0.015:,.0f}**"},
+            ]
+            st.dataframe(_pd.DataFrame(flow_rows), use_container_width=True, hide_index=True)
+
+            st.info(f"💡 {snap['tip']}")
+
+            st.divider()
+            st.markdown("### 🏠 Next steps if selling")
+            st.markdown(
+                "After selling your HDB, you have **6 months** to purchase a replacement property "
+                "before ABSD kicks in on a private purchase. If buying another HDB, you may be subject to "
+                "a **Resale Levy** (SGD 15,000–55,000 depending on flat type). Use the 💹 Tools tab to "
+                "compute ABSD for your next purchase."
+            )
+            if st.button("📊 Calculate ABSD for Next Purchase", key="mop_to_absd"):
+                st.info("Head to 💹 Tools → Stamp Duty Calculator. Set property count to 2 if you own another property.")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
@@ -2124,6 +2269,32 @@ elif tab_select == "⚙️ Admin":
         c2.metric("Total Cost (SGD)", f"${costs['est_sgd']:.4f}")
         c3.metric("Total Tokens Used", f"{costs['total_tokens']:,}")
         st.metric("API Calls Made", costs["call_count"])
+
+        st.divider()
+        st.subheader("📋 Regulatory Data — Last Verified")
+        st.caption("These rates are hardcoded from official sources. Verify after each Singapore Budget (usually February) and update the corresponding file if rates change.")
+
+        from data.stamp_duty import RATES_EFFECTIVE_DATE
+        _REG_SOURCES = [
+            {"name": "BSD / ABSD / SSD rates", "file": "data/stamp_duty.py",
+             "verified": RATES_EFFECTIVE_DATE, "url": "https://www.iras.gov.sg/taxes/stamp-duty/for-property/buying-or-acquiring-property/additional-buyer's-stamp-duty-(absd)"},
+            {"name": "TDSR / MSR limits (55% / 30%)", "file": "data/mortgage_agent.py → TDSR_LIMIT",
+             "verified": "Jun 2023 (MAS)", "url": "https://www.mas.gov.sg/regulation/explainers/tdsr-framework"},
+            {"name": "HDB Concessionary Rate (2.60%)", "file": "agents/mortgage_agent.py → HDB (CPF Board)",
+             "verified": "Jan 2024", "url": "https://www.hdb.gov.sg/residential/buying-a-flat/financing-your-flat-purchase/housing-loan-from-hdb"},
+            {"name": "CPF OA rate + property withdrawal rules", "file": "agents/mortgage_agent.py → CPF_VALUATION_LIMIT_PCT",
+             "verified": "Jan 2024", "url": "https://www.cpf.gov.sg/member/home-ownership/using-your-cpf-to-buy-a-home"},
+            {"name": "MOP rules (5 years)", "file": "data/mop_tracker.py → MOP_YEARS",
+             "verified": "2021 (HDB)", "url": "https://www.hdb.gov.sg/residential/selling-a-flat/eligibility"},
+        ]
+        import pandas as _pd
+        _reg_df = _pd.DataFrame(_REG_SOURCES)
+        for _, row in _reg_df.iterrows():
+            _col1, _col2, _col3 = st.columns([3, 2, 2])
+            _col1.markdown(f"**{row['name']}**  \n`{row['file']}`")
+            _col2.markdown(f"✅ Verified: {row['verified']}")
+            _col3.markdown(f"[Check official source ↗]({row['url']})")
+        st.caption("After verifying a change, update the file and change the verified date above.")
 
         st.divider()
         st.subheader("🔄 Data Sync")
