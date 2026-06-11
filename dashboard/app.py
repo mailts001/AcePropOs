@@ -326,6 +326,7 @@ with st.sidebar:
             "🔍 Valuation",
             "⚖️ Compare",
             "🏚️ En-Bloc",
+            "🗺️ MRT Map",
         ],
         "📰 Intelligence": [
             "📰 News & Sentiment",
@@ -340,6 +341,7 @@ with st.sidebar:
             "🛡️ Insurance",
             "🔔 Watchlist & Alerts",
         ],
+        "💼 My Portfolio": ["💼 Portfolio"],
         "🤝 Partners": ["🤝 Partners"],
         "⚙️ Admin":    ["⚙️ Admin"],
     }
@@ -360,15 +362,36 @@ with st.sidebar:
     )
 
     pages = NAV[nav_cat]
+
+    # ── Page popularity counts (from analytics) ──────────────────────────────
+    _page_counts: dict = {}
+    try:
+        from data.analytics import get_summary as _get_summary
+        _qs = _get_summary(7)
+        _page_counts = {p["page"]: p["views"] for p in _qs.get("by_page", [])}
+    except Exception:
+        pass
+
+    def _label(pg: str) -> str:
+        """Append heat indicator to page label based on 7-day views."""
+        alias_key = _NAV_ALIASES.get(pg, pg)
+        cnt = _page_counts.get(alias_key, _page_counts.get(pg, 0))
+        if cnt >= 50:  return f"{pg} 🔥"
+        if cnt >= 20:  return f"{pg} ·{cnt}"
+        if cnt >= 5:   return f"{pg} ·{cnt}"
+        return pg
+
     if len(pages) == 1:
         nav_page = pages[0]
     else:
         st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin:6px 0 2px 0'>Sub Menus</p>", unsafe_allow_html=True)
-        nav_page = st.radio(
+        nav_page_label = st.radio(
             "Page",
-            pages,
+            [_label(p) for p in pages],
             label_visibility="collapsed",
         )
+        # Strip the label suffix to get the clean page name
+        nav_page = pages[[_label(p) for p in pages].index(nav_page_label)]
 
     # Resolve alias so existing elif chain keeps working unchanged
     tab_select = _NAV_ALIASES.get(nav_page, nav_page)
@@ -402,6 +425,35 @@ with st.sidebar:
 - **Fire Insurance** — Covers the structure of your property (required for HDB).
 - **Home Contents** — Covers furniture, appliances, and belongings inside your home.
         """)
+    # ── Live visitor stats ────────────────────────────────────────────────────
+    try:
+        from data.analytics import get_summary as _vs
+        _today_stats = _vs(1)
+        _total_stats = _vs(365)
+        _d = _today_stats["unique_visitors_ip"]
+        _t = _total_stats["unique_visitors_ip"]
+        st.markdown(
+            f"<p style='font-size:0.72rem;opacity:0.55;margin:4px 0 0 0'>"
+            f"👁 Today: <b>{_d}</b> visitors · Total: <b>{_t}</b></p>",
+            unsafe_allow_html=True
+        )
+    except Exception:
+        pass
+
+    # ── Email capture (subtle, sidebar) ──────────────────────────────────────
+    with st.expander("📬 Get market updates", expanded=False):
+        _cap_email = st.text_input("Your email", placeholder="you@email.com", key="cap_email", label_visibility="collapsed")
+        if st.button("Subscribe", key="cap_sub", use_container_width=True):
+            if "@" in _cap_email:
+                try:
+                    from data.analytics import track_pageview
+                    track_pageview("email_capture", session_id=st.session_state.get("session_id",""), email=_cap_email)
+                except Exception:
+                    pass
+                st.success("✅ Subscribed!")
+            else:
+                st.warning("Enter a valid email.")
+
     st.caption("v1.0 · acepropos.duckdns.org")
 
 # ── Session tracking (analytics) ─────────────────────────────────────────────
@@ -2873,6 +2925,237 @@ elif tab_select == "⚖️ Compare":
         st.info(f"**Best estimated yield:** Property {best_yield_idx + 1} ({props[best_yield_idx]['label']})")
         st.caption("TDSR limit is 55%. Red ⚠️ = exceeds limit. Yields are indicative benchmarks, not guaranteed.")
 
+# ── MRT Proximity Map ─────────────────────────────────────────────────────────
+elif tab_select == "🗺️ MRT Map":
+    st.header("🗺️ MRT Connectivity")
+    st.markdown("*Find the nearest MRT/LRT stations to any HDB town or private district. Walk-time estimates and connectivity score included.*")
+
+    from data.mrt_proximity import mrt_for_district, mrt_for_town, mrt_score, nearest_mrt, DISTRICT_CENTROIDS, TOWN_CENTROIDS
+    import pandas as pd
+
+    mrt_type = st.radio("Search by", ["🏠 HDB Town", "🏢 Private District", "📍 Coordinates"], horizontal=True)
+
+    if mrt_type == "🏠 HDB Town":
+        town_sel = st.selectbox("Select town", sorted(TOWN_CENTROIDS.keys()))
+        stations = mrt_for_town(town_sel, top_n=8)
+        loc_label = town_sel
+        coords = TOWN_CENTROIDS.get(town_sel)
+    elif mrt_type == "🏢 Private District":
+        dist_sel = st.number_input("District (1–28)", 1, 28, 9)
+        stations = mrt_for_district(dist_sel, top_n=8)
+        loc_label = f"D{dist_sel}"
+        coords = DISTRICT_CENTROIDS.get(dist_sel)
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            lat_in = st.number_input("Latitude", 1.2, 1.5, 1.304, format="%.4f")
+        with c2:
+            lon_in = st.number_input("Longitude", 103.6, 104.0, 103.831, format="%.4f")
+        stations = nearest_mrt(lat_in, lon_in, top_n=8)
+        loc_label = f"{lat_in:.4f}, {lon_in:.4f}"
+        coords = (lat_in, lon_in)
+
+    if stations:
+        score = mrt_score(stations)
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Nearest MRT", stations[0]["station"])
+        sc2.metric("Distance", f"{stations[0]['distance_m']:,} m")
+        sc3.metric("Connectivity Score", f"{score}/100",
+                   delta="Excellent" if score >= 80 else "Good" if score >= 60 else "Fair" if score >= 40 else "Poor",
+                   delta_color="normal")
+
+        st.subheader(f"Nearest MRT Stations — {loc_label}")
+        rows = []
+        for s in stations:
+            rows.append({
+                "Station": s["station"],
+                "Line": s["line"],
+                "Distance": f"{s['distance_m']:,} m",
+                "Walk Time": s["walk_label"],
+                "Walkable": "✅" if s["distance_m"] <= 800 else "🚌" if s["distance_m"] <= 1500 else "🚗",
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        # Visual walk-time bar
+        st.subheader("Walk Time to Each Station")
+        chart_df = pd.DataFrame({
+            "Walk (min)": [s["walk_min"] for s in stations]
+        }, index=[s["station"] for s in stations])
+        st.bar_chart(chart_df, height=220)
+
+        # Folium map if available
+        try:
+            import folium
+            from streamlit_folium import st_folium
+            m = folium.Map(location=list(coords), zoom_start=15, tiles="CartoDB positron")
+            # Property marker
+            folium.Marker(
+                list(coords), popup=loc_label,
+                icon=folium.Icon(color="red", icon="home", prefix="fa")
+            ).add_to(m)
+            # MRT markers
+            for s in stations:
+                color = "blue" if s["distance_m"] <= 800 else "gray"
+                folium.Marker(
+                    [s["lat"], s["lon"]],
+                    popup=f"{s['station']} ({s['line']}) — {s['walk_label']}",
+                    tooltip=s["station"],
+                    icon=folium.Icon(color=color, icon="train", prefix="fa")
+                ).add_to(m)
+                if s["distance_m"] <= 1500:
+                    folium.PolyLine(
+                        [list(coords), [s["lat"], s["lon"]]],
+                        color=s["color"], weight=2, opacity=0.6, dash_array="5"
+                    ).add_to(m)
+            st_folium(m, height=420, use_container_width=True)
+        except ImportError:
+            st.info("Interactive map requires `folium` and `streamlit-folium`. Install on VPS: `pip install folium streamlit-folium`")
+
+        st.caption("Walk speed: 80 m/min (~4.8 km/h). Distances are straight-line — actual walk may be longer.")
+
+        # MRT scoring context
+        with st.expander("📖 What does the Connectivity Score mean?"):
+            st.markdown("""
+| Score | Rating | Meaning |
+|---|---|---|
+| 80–100 | 🟢 Excellent | ≤400m walk to MRT — premium connectivity, commands higher resale/rental |
+| 60–79 | 🟡 Good | ≤800m walk — comfortable, most buyers/tenants accept this |
+| 40–59 | 🟠 Fair | ≤1,200m walk — bus/bicycle often needed |
+| <40 | 🔴 Poor | >1,200m — car-dependent, negative impact on yield and resale |
+
+**Rule of thumb:** Each additional 100m from MRT reduces rental yield by ~0.05–0.1% and resale premium by ~1–2%.
+            """)
+
+# ── Portfolio Tracker ──────────────────────────────────────────────────────────
+elif tab_select == "💼 Portfolio":
+    st.header("💼 My Property Portfolio")
+    st.markdown("*Track your owned properties, monitor unrealised gains, CPF accrued interest and net equity in one place.*")
+
+    from data.portfolio_tracker import (
+        ensure_schema as pt_schema, add_property, get_portfolio,
+        delete_property, update_valuation, analyse_property, portfolio_summary
+    )
+    pt_schema()
+    import pandas as pd
+
+    _pt_user = st.text_input(
+        "Your Telegram ID (to save your portfolio)",
+        value=str(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")),
+        placeholder="e.g. 1245366658", key="pt_user"
+    )
+
+    pt_tab1, pt_tab2 = st.tabs(["📋 My Properties", "➕ Add Property"])
+
+    with pt_tab2:
+        st.subheader("Add a property to your portfolio")
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            pt_name = st.text_input("Property name / address", key="pt_name", placeholder="Tampines St 45 Blk 123 #08-12")
+            pt_ptype = st.selectbox("Type", ["HDB Resale", "BTO", "Private Condo/Apt", "EC", "Landed"], key="pt_ptype")
+            pt_town = st.text_input("Town / District", key="pt_town", placeholder="TAMPINES or D15")
+            pt_flat = st.selectbox("Flat Type (HDB)", ["", "3 ROOM","4 ROOM","5 ROOM","EXECUTIVE","N/A"], key="pt_flat")
+        with pc2:
+            pt_price = st.number_input("Purchase Price (SGD)", 100000, 10000000, 500000, step=10000, key="pt_price")
+            pt_date = st.date_input("Purchase / Key Collection Date", key="pt_date")
+            pt_loan = st.number_input("Loan Amount (SGD)", 0, 8000000, 400000, step=10000, key="pt_loan")
+            pt_rate = st.number_input("Interest Rate (%)", 0.5, 8.0, 3.5, step=0.1, key="pt_rate")
+        pc3, pc4 = st.columns(2)
+        with pc3:
+            pt_tenure = st.number_input("Loan Tenure (years)", 5, 30, 25, key="pt_tenure")
+            pt_cpf = st.number_input("CPF Used (SGD)", 0, 3000000, 0, step=5000, key="pt_cpf")
+        with pc4:
+            pt_cur_val = st.number_input("Current Est. Value (SGD)", 100000, 10000000, 550000, step=10000, key="pt_curval",
+                                          help="Your best estimate or latest valuation. You can update this anytime.")
+            pt_rent = st.number_input("Monthly Rent Received (0 if owner-occupied)", 0, 20000, 0, step=100, key="pt_rent")
+        pt_notes = st.text_area("Notes (optional)", key="pt_notes")
+
+        if st.button("Save to Portfolio", type="primary", key="pt_save"):
+            if not _pt_user:
+                st.warning("Enter your Telegram ID above to save.")
+            elif not pt_name:
+                st.warning("Enter a property name.")
+            else:
+                add_property(
+                    telegram_id=_pt_user, property_name=pt_name,
+                    property_type=pt_ptype, town_or_district=pt_town,
+                    flat_type=pt_flat, purchase_price=pt_price,
+                    purchase_date=str(pt_date), loan_amount=pt_loan,
+                    annual_rate_pct=pt_rate, tenure_years=pt_tenure,
+                    cpf_used=pt_cpf, current_est_value=pt_cur_val,
+                    monthly_rent_sgd=pt_rent, notes=pt_notes
+                )
+                st.success(f"✅ {pt_name} added to your portfolio!")
+                st.rerun()
+
+    with pt_tab1:
+        if not _pt_user:
+            st.info("Enter your Telegram ID above to view your portfolio.")
+        else:
+            summary = portfolio_summary(_pt_user)
+            if summary["count"] == 0:
+                st.info("No properties yet. Go to **➕ Add Property** to track your first property.")
+            else:
+                # Portfolio KPIs
+                k1, k2, k3, k4, k5 = st.columns(5)
+                k1.metric("Properties", summary["count"])
+                k2.metric("Total Value", f"SGD {summary['total_current_value']:,.0f}")
+                k3.metric("Total Gain", f"SGD {summary['total_capital_gain']:,.0f}",
+                          delta=f"{summary['total_gain_pct']:+.1f}%")
+                k4.metric("Net Equity", f"SGD {summary['total_net_equity']:,.0f}")
+                k5.metric("Outstanding Loans", f"SGD {summary['total_outstanding_loans']:,.0f}")
+
+                if summary.get("total_rental_income", 0) > 0:
+                    st.metric("Total Rental Income (all time)", f"SGD {summary['total_rental_income']:,.0f}")
+                    st.metric("Total Return (capital + rent)", f"SGD {summary['total_return']:,.0f}")
+
+                st.divider()
+
+                # Per-property cards
+                for prop in summary["properties"]:
+                    with st.expander(f"🏠 {prop['property_name']} — {prop['property_type']}", expanded=True):
+                        p1, p2, p3, p4 = st.columns(4)
+                        p1.metric("Purchase Price", f"SGD {prop['purchase_price']:,.0f}")
+                        p2.metric("Current Value", f"SGD {prop['current_value']:,.0f}")
+                        p3.metric("Capital Gain", f"SGD {prop['capital_gain_sgd']:,.0f}",
+                                  delta=f"{prop['gain_pct']:+.1f}% · {prop['annual_appreciation_pct']:+.1f}%/yr")
+                        p4.metric("Net Equity", f"SGD {prop['net_equity']:,.0f}")
+
+                        p5, p6, p7, p8 = st.columns(4)
+                        p5.metric("Outstanding Loan", f"SGD {prop['outstanding_loan']:,.0f}")
+                        p6.metric("Monthly Payment", f"SGD {prop['monthly_payment']:,.0f}")
+                        if prop["cpf_used"] > 0:
+                            p7.metric("CPF to Refund on Sale", f"SGD {prop['cpf_to_refund']:,.0f}",
+                                      help="CPF principal + 2.5% p.a. accrued interest — must be refunded to CPF OA when you sell")
+                        if prop["monthly_rent"] > 0:
+                            p8.metric("Gross Yield", f"{prop['gross_yield_pct']:.2f}%",
+                                      delta=f"Net {prop['net_yield_pct']:.2f}%")
+
+                        # Update valuation + delete
+                        uc1, uc2, uc3 = st.columns(3)
+                        with uc1:
+                            new_val = st.number_input("Update current value (SGD)", 100000, 10000000,
+                                                       int(prop["current_value"]), step=10000,
+                                                       key=f"upd_val_{prop['id']}")
+                        with uc2:
+                            if st.button("💾 Update Value", key=f"upd_btn_{prop['id']}"):
+                                update_valuation(prop["id"], new_val)
+                                st.success("Updated!")
+                                st.rerun()
+                        with uc3:
+                            if st.button("🗑️ Remove", key=f"del_{prop['id']}"):
+                                delete_property(prop["id"], _pt_user)
+                                st.rerun()
+
+                # Portfolio chart
+                if summary["count"] > 1:
+                    st.divider()
+                    st.subheader("Portfolio Breakdown")
+                    chart_data = pd.DataFrame({
+                        "Current Value": [p["current_value"] for p in summary["properties"]],
+                        "Purchase Price": [p["purchase_price"] for p in summary["properties"]],
+                    }, index=[p["property_name"][:25] for p in summary["properties"]])
+                    st.bar_chart(chart_data, height=250)
+
 # ── Partners ──────────────────────────────────────────────────────────────────
 elif tab_select == "🤝 Partners":
     st.header("🤝 Partner with PropOS")
@@ -3047,7 +3330,7 @@ elif tab_select == "⚙️ Admin":
         if stats["by_day"]:
             trend_df = _apd.DataFrame(stats["by_day"]).set_index("date")
             st.markdown("**Daily Traffic**")
-            st.bar_chart(trend_df["views"])
+            st.line_chart(trend_df["views"], height=180)
 
         # Top features
         if stats["top_features"]:

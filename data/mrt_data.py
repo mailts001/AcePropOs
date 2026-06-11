@@ -1,0 +1,163 @@
+"""
+Singapore MRT/LRT station coordinates and line data.
+No API needed — static dataset. Used for proximity calculations.
+Coordinates: WGS84 (lat, lon).
+"""
+
+# (station_name, line_code, lat, lon, district)
+MRT_STATIONS = [
+    # ── NSL (North-South Line) ─────────────────────────────────────────────
+    ("Jurong East", "NS1/EW24", 1.3332, 103.7422, 22),
+    ("Bukit Batok", "NS2", 1.3491, 103.7495, 23),
+    ("Bukit Gombak", "NS3", 1.3588, 103.7517, 23),
+    ("Choa Chu Kang", "NS4/BP1", 1.3853, 103.7443, 23),
+    ("Yew Tee", "NS5", 1.3969, 103.7474, 25),
+    ("Kranji", "NS7", 1.4252, 103.7619, 25),
+    ("Marsiling", "NS8", 1.4326, 103.7743, 25),
+    ("Woodlands", "NS9/TE2", 1.4370, 103.7866, 25),
+    ("Admiralty", "NS10", 1.4409, 103.8008, 25),
+    ("Sembawang", "NS11", 1.4491, 103.8200, 27),
+    ("Canberra", "NS12", 1.4432, 103.8297, 27),
+    ("Yishun", "NS13", 1.4294, 103.8354, 27),
+    ("Khatib", "NS14", 1.4175, 103.8329, 27),
+    ("Yio Chu Kang", "NS15", 1.3817, 103.8447, 19),
+    ("Ang Mo Kio", "NS16", 1.3700, 103.8496, 20),
+    ("Bishan", "NS17/CC15", 1.3509, 103.8484, 20),
+    ("Braddell", "NS18", 1.3401, 103.8468, 12),
+    ("Toa Payoh", "NS19", 1.3326, 103.8470, 12),
+    ("Novena", "NS20", 1.3203, 103.8435, 11),
+    ("Newton", "NS21/DT11", 1.3133, 103.8387, 11),
+    ("Orchard", "NS22/TE14", 1.3040, 103.8319, 9),
+    ("Somerset", "NS23", 1.2998, 103.8390, 9),
+    ("Dhoby Ghaut", "NS24/NE6/CC1", 1.2993, 103.8459, 9),
+    ("City Hall", "NS25/EW13", 1.2931, 103.8520, 6),
+    ("Raffles Place", "NS26/EW14", 1.2840, 103.8513, 1),
+    ("Marina Bay", "NS27/CE2/TE20", 1.2763, 103.8546, 1),
+    ("Marina South Pier", "NS28", 1.2710, 103.8634, 1),
+    # ── EWL (East-West Line) ───────────────────────────────────────────────
+    ("Pasir Ris", "EW1", 1.3726, 103.9494, 18),
+    ("Tampines", "EW2/DT32", 1.3528, 103.9455, 18),
+    ("Simei", "EW3", 1.3432, 103.9533, 18),
+    ("Tanah Merah", "EW4", 1.3272, 103.9463, 16),
+    ("Bedok", "EW5", 1.3240, 103.9300, 16),
+    ("Kembangan", "EW6", 1.3212, 103.9130, 14),
+    ("Eunos", "EW7", 1.3198, 103.9027, 14),
+    ("Paya Lebar", "EW8/CC9", 1.3180, 103.8926, 14),
+    ("Aljunied", "EW9", 1.3163, 103.8830, 14),
+    ("Kallang", "EW10", 1.3113, 103.8713, 12),
+    ("Lavender", "EW11", 1.3073, 103.8635, 7),
+    ("Bugis", "EW12/DT14", 1.3009, 103.8564, 7),
+    ("Tanjong Pagar", "EW15", 1.2764, 103.8454, 2),
+    ("Outram Park", "EW16/NE3/TE17", 1.2801, 103.8396, 2),
+    ("Tiong Bahru", "EW17", 1.2864, 103.8274, 3),
+    ("Redhill", "EW18", 1.2896, 103.8167, 3),
+    ("Queenstown", "EW19", 1.2944, 103.8061, 3),
+    ("Commonwealth", "EW20", 1.3023, 103.7981, 5),
+    ("Buona Vista", "EW21/CC22", 1.3074, 103.7900, 5),
+    ("Dover", "EW22", 1.3112, 103.7789, 5),
+    ("Clementi", "EW23", 1.3152, 103.7652, 5),
+    ("Chinese Garden", "EW25", 1.3424, 103.7322, 22),
+    ("Lakeside", "EW26", 1.3440, 103.7210, 22),
+    ("Boon Lay", "EW27", 1.3387, 103.7058, 22),
+    ("Pioneer", "EW28", 1.3374, 103.6974, 22),
+    ("Joo Koon", "EW29", 1.3279, 103.6783, 22),
+    ("Gul Circle", "EW30", 1.3198, 103.6614, 22),
+    ("Tuas Crescent", "EW31", 1.3214, 103.6492, 22),
+    ("Tuas West Road", "EW32", 1.3305, 103.6397, 22),
+    ("Tuas Link", "EW33", 1.3406, 103.6369, 22),
+    # ── NEL (North-East Line) ──────────────────────────────────────────────
+    ("HarbourFront", "NE1/CC29", 1.2653, 103.8200, 4),
+    ("Chinatown", "NE4/DT19", 1.2849, 103.8441, 1),
+    ("Clarke Quay", "NE5", 1.2882, 103.8464, 6),
+    ("Little India", "NE7/DT12", 1.3065, 103.8499, 8),
+    ("Farrer Park", "NE8", 1.3123, 103.8552, 8),
+    ("Boon Keng", "NE9", 1.3194, 103.8618, 12),
+    ("Potong Pasir", "NE10", 1.3314, 103.8695, 13),
+    ("Woodleigh", "NE11", 1.3394, 103.8707, 13),
+    ("Serangoon", "NE12/CC13", 1.3497, 103.8731, 19),
+    ("Kovan", "NE13", 1.3596, 103.8855, 19),
+    ("Hougang", "NE14", 1.3714, 103.8924, 19),
+    ("Buangkok", "NE15", 1.3829, 103.8926, 19),
+    ("Sengkang", "NE16/STC", 1.3915, 103.8954, 19),
+    ("Punggol", "NE17/PTC", 1.4055, 103.9022, 19),
+    # ── CCL (Circle Line) ──────────────────────────────────────────────────
+    ("Bartley", "CC12", 1.3424, 103.8798, 19),
+    ("Tai Seng", "CC11", 1.3357, 103.8878, 13),
+    ("MacPherson", "CC10/DT26", 1.3265, 103.8893, 13),
+    ("Marymount", "CC16", 1.3493, 103.8395, 20),
+    ("Caldecott", "CC17/TE9", 1.3370, 103.8393, 11),
+    ("Botanic Gardens", "CC19/DT9", 1.3222, 103.8153, 10),
+    ("Farrer Road", "CC20", 1.3170, 103.8079, 10),
+    ("Holland Village", "CC21", 1.3115, 103.7962, 10),
+    ("one-north", "CC23", 1.2993, 103.7872, 5),
+    ("Kent Ridge", "CC24", 1.2939, 103.7846, 5),
+    ("Haw Par Villa", "CC25", 1.2828, 103.7821, 5),
+    ("Pasir Panjang", "CC26", 1.2769, 103.7919, 5),
+    ("Labrador Park", "CC27", 1.2721, 103.8025, 4),
+    ("Telok Blangah", "CC28", 1.2705, 103.8096, 4),
+    ("Bayfront", "CE1/DT16", 1.2822, 103.8597, 1),
+    ("Esplanade", "CC3", 1.2937, 103.8557, 6),
+    ("Promenade", "CC4/DT15", 1.2934, 103.8619, 6),
+    ("Nicoll Highway", "CC5", 1.2993, 103.8632, 7),
+    ("Stadium", "CC6", 1.3025, 103.8752, 15),
+    ("Mountbatten", "CC7", 1.3063, 103.8821, 15),
+    ("Dakota", "CC8", 1.3083, 103.8880, 15),
+    ("Lorong Chuan", "CC14", 1.3519, 103.8660, 19),
+    # ── DTL (Downtown Line) ────────────────────────────────────────────────
+    ("Bukit Panjang", "DT1/BP6", 1.3789, 103.7762, 23),
+    ("Cashew", "DT2", 1.3697, 103.7837, 23),
+    ("Hillview", "DT3", 1.3618, 103.7673, 23),
+    ("Beauty World", "DT5", 1.3410, 103.7757, 21),
+    ("King Albert Park", "DT6", 1.3355, 103.7837, 21),
+    ("Sixth Avenue", "DT7", 1.3306, 103.7952, 10),
+    ("Tan Kah Kee", "DT8", 1.3264, 103.8073, 10),
+    ("Stevens", "DT10/TE11", 1.3196, 103.8263, 11),
+    ("Rochor", "DT13", 1.3043, 103.8521, 7),
+    ("Bencoolen", "DT21", 1.2987, 103.8498, 7),
+    ("Jalan Besar", "DT22", 1.3051, 103.8562, 8),
+    ("Bendemeer", "DT23", 1.3131, 103.8623, 12),
+    ("Geylang Bahru", "DT24", 1.3213, 103.8712, 12),
+    ("Mattar", "DT25", 1.3268, 103.8830, 13),
+    ("Ubi", "DT27", 1.3298, 103.8982, 14),
+    ("Kaki Bukit", "DT28", 1.3352, 103.9091, 14),
+    ("Bedok North", "DT29", 1.3344, 103.9170, 16),
+    ("Bedok Reservoir", "DT30", 1.3363, 103.9324, 16),
+    ("Upper Changi", "DT34", 1.3416, 103.9614, 17),
+    ("Expo", "DT35/CG1", 1.3353, 103.9616, 17),
+    ("Xilin", "DT36", 1.3281, 103.9659, 17),
+    ("Sungei Bedok", "DT37/TE31", 1.3209, 103.9660, 17),
+    # ── TEL (Thomson-East Coast Line, partial) ─────────────────────────────
+    ("Springleaf", "TE4", 1.3993, 103.8198, 26),
+    ("Lentor", "TE5", 1.3879, 103.8354, 26),
+    ("Mayflower", "TE6", 1.3748, 103.8374, 26),
+    ("Bright Hill", "TE7", 1.3628, 103.8353, 26),
+    ("Upper Thomson", "TE8", 1.3543, 103.8323, 26),
+    ("Mount Pleasant", "TE10", 1.3285, 103.8283, 11),
+    ("Marina Bay (TEL)", "TE20", 1.2763, 103.8546, 1),
+    ("Shenton Way", "TE19", 1.2778, 103.8490, 1),
+    ("Gardens by the Bay", "TE22", 1.2813, 103.8633, 1),
+    ("Tanjong Rhu", "TE23", 1.2949, 103.8729, 15),
+    ("Katong Park", "TE24", 1.3013, 103.8802, 15),
+    ("Tanjong Katong", "TE25", 1.3072, 103.8910, 15),
+    ("Marine Parade", "TE26", 1.3024, 103.9050, 15),
+    ("Marine Terrace", "TE27", 1.3055, 103.9138, 15),
+    ("Siglap", "TE28", 1.3107, 103.9259, 16),
+    ("Bayshore", "TE29", 1.3142, 103.9397, 16),
+    ("Bedok South", "TE30", 1.3175, 103.9497, 16),
+]
+
+LINE_COLORS = {
+    "NS": "#E2231A",   # Red
+    "EW": "#009645",   # Green
+    "NE": "#9900AA",   # Purple
+    "CC": "#FA9E0D",   # Orange
+    "DT": "#005EC4",   # Blue
+    "TE": "#9D5B25",   # Brown
+    "BP": "#748477",   # Grey
+}
+
+def get_line_color(line_code: str) -> str:
+    for prefix, color in LINE_COLORS.items():
+        if line_code.startswith(prefix):
+            return color
+    return "#888888"

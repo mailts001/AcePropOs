@@ -30,3 +30,5 @@ pandas>=2.0.0
 matplotlib>=3.7.0
 python-dateutil>=2.8.0
 fpdf2>=2.7.0
+folium>=0.15.0
+streamlit-folium>=0.18.0
