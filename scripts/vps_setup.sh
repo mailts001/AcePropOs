@@ -41,8 +41,16 @@ cd $APP_DIR
 
 # ── Step 4: Python venv + deps ─────────────────────────────────────────────
 echo "[4/8] Setting up Python venv..."
-# Ubuntu 26.04 ships Python 3.12 or 3.13 — use whichever is available
-PYTHON=$(which python3.13 2>/dev/null || which python3.12 2>/dev/null || which python3)
+# pydantic-core requires Python <=3.13 (PyO3 limitation)
+# Ubuntu 26.04 ships 3.14 — explicitly use 3.13 if available, install if not
+if ! command -v python3.13 &>/dev/null; then
+    echo "Python 3.13 not found — installing from deadsnakes PPA..."
+    apt-get install -y software-properties-common
+    add-apt-repository ppa:deadsnakes/ppa -y
+    apt-get update -qq
+    apt-get install -y python3.13 python3.13-venv python3.13-dev
+fi
+PYTHON=python3.13
 echo "Using Python: $PYTHON ($($PYTHON --version))"
 $PYTHON -m venv .venv
 .venv/bin/pip install --upgrade pip setuptools wheel -q
