@@ -841,68 +841,66 @@ elif tab_select == "🔍 Valuation":
                     if result.get("explanation"):
                         st.write("**AI Analysis:**", result["explanation"])
 
-                # ── Rental Intelligence for this district ──
-                st.divider()
-                st.subheader(f"🏘️ Rental Market — D{district}")
-                try:
-                    from data.ura_rental_pipeline import get_district_rental_stats
-                    rental_stats = get_district_rental_stats(district)
-                    if rental_stats.get("status") == "ok":
-                        st.caption(f"URA median rental data · {rental_stats.get('latest_quarter','')}")
-                        bed_data = rental_stats.get("by_bedrooms", {})
-                        if bed_data:
-                            import pandas as _rpd
-                            rows = []
-                            for beds, info in sorted(bed_data.items()):
-                                label = f"{beds} BR" if beds not in ("NA","") else "Studio/NA"
-                                med = info.get("median_rent_sgd") or 0
-                                p25 = info.get("p25_rent_sgd") or 0
-                                p75 = info.get("p75_rent_sgd") or 0
-                                # Rough yield: use valuation result if available
-                                est_val = result.get("estimated_value_sgd", 0) if result.get("status") == "ok" else 0
-                                gross_y = round(med * 12 / est_val * 100, 2) if est_val and med else 0
-                                rows.append({"Bedrooms": label, "Median Rent/mo": f"${med:,.0f}" if med else "—",
-                                             "P25": f"${p25:,.0f}" if p25 else "—",
-                                             "P75": f"${p75:,.0f}" if p75 else "—",
-                                             "Est. Gross Yield": f"{gross_y:.2f}%" if gross_y else "—"})
-                            st.dataframe(_rpd.DataFrame(rows), hide_index=True, use_container_width=True)
-                            st.caption("Yield estimated using your selected property value. Actual yield depends on unit size, floor and furnishing.")
-                        else:
-                            st.info("No rental breakdown available for this district yet.")
-                    else:
-                        st.info("Rental median data not yet cached. Run `sync_ura.py` to populate.")
-                except Exception as _re:
-                    st.caption(f"Rental data unavailable: {_re}")
-
-                # ── PDF Export ──
-                st.divider()
-                if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
+                    # ── Rental Intelligence for this district ──
+                    st.divider()
+                    st.subheader(f"🏘️ Rental Market — D{district}")
                     try:
-                        from agents.pdf_report import generate_valuation_report
-                        pdf_bytes = generate_valuation_report(
-                            property_address=f"District {district}",
-                            property_type=property_type,
-                            area_sqft=area_sqft,
-                            estimated_value=result.get("estimated_value_sgd", 0),
-                            median_price=result.get("median_psf", 0) * area_sqft,
-                            transactions_used=result.get("transactions_used", 0),
-                            asking_price=asking_price,
-                            vs_median_pct=result.get("vs_median_pct", 0),
-                            verdict=result.get("verdict", ""),
-                            ai_analysis=result.get("explanation", ""),
-                            district=district,
-                        )
-                        st.download_button(
-                            "💾 Save PDF", pdf_bytes,
-                            file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
-                            mime="application/pdf", key="dl_pdf_priv"
-                        )
-                    except ImportError:
-                        st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
-                    except Exception as _pe:
-                        st.error(f"PDF error: {_pe}")
+                        from data.ura_rental_pipeline import get_district_rental_stats
+                        rental_stats = get_district_rental_stats(district)
+                        if rental_stats.get("status") == "ok":
+                            st.caption(f"URA median rental data · {rental_stats.get('latest_quarter','')}")
+                            bed_data = rental_stats.get("by_bedrooms", {})
+                            if bed_data:
+                                import pandas as _rpd
+                                rows = []
+                                for beds, info in sorted(bed_data.items()):
+                                    label = f"{beds} BR" if beds not in ("NA","") else "Studio/NA"
+                                    med = info.get("median_rent_sgd") or 0
+                                    p25 = info.get("p25_rent_sgd") or 0
+                                    p75 = info.get("p75_rent_sgd") or 0
+                                    est_val = result.get("estimated_value_sgd", 0)
+                                    gross_y = round(med * 12 / est_val * 100, 2) if est_val and med else 0
+                                    rows.append({"Bedrooms": label, "Median Rent/mo": f"${med:,.0f}" if med else "—",
+                                                 "P25": f"${p25:,.0f}" if p25 else "—",
+                                                 "P75": f"${p75:,.0f}" if p75 else "—",
+                                                 "Est. Gross Yield": f"{gross_y:.2f}%" if gross_y else "—"})
+                                st.dataframe(_rpd.DataFrame(rows), hide_index=True, use_container_width=True)
+                                st.caption("Yield estimated using your selected property value. Actual yield depends on unit size, floor and furnishing.")
+                            else:
+                                st.info("No rental breakdown available for this district yet.")
+                        else:
+                            st.info("Rental median data not yet cached. Run `sync_ura.py` to populate.")
+                    except Exception as _re:
+                        st.caption(f"Rental data unavailable: {_re}")
 
-            else:
+                    # ── PDF Export ──
+                    st.divider()
+                    if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
+                        try:
+                            from agents.pdf_report import generate_valuation_report
+                            pdf_bytes = generate_valuation_report(
+                                property_address=f"District {district}",
+                                property_type=property_type,
+                                area_sqft=area_sqft,
+                                estimated_value=result.get("estimated_value_sgd", 0),
+                                median_price=result.get("median_psf", 0) * area_sqft,
+                                transactions_used=result.get("transactions_used", 0),
+                                asking_price=asking_price,
+                                vs_median_pct=result.get("vs_median_pct", 0),
+                                verdict=result.get("verdict", ""),
+                                ai_analysis=result.get("explanation", ""),
+                                district=district,
+                            )
+                            st.download_button(
+                                "💾 Save PDF", pdf_bytes,
+                                file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
+                                mime="application/pdf", key="dl_pdf_priv"
+                            )
+                        except ImportError:
+                            st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
+                        except Exception as _pe:
+                            st.error(f"PDF error: {_pe}")
+                else:
                     st.warning(result.get("message", "Insufficient data"))
 
     else:  # Heatmap
