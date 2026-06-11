@@ -24,6 +24,7 @@ from agents.deal_hunter_agent import DealHunterAgent
 from agents.valuation_agent import ValuationAgent
 from agents.news_intel_agent import NewsIntelAgent
 from data.news_pipeline import get_sentiment_index
+from data.hdb_pipeline import find_below_market_hdb
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("propos_bot")
@@ -37,16 +38,19 @@ DEALS_CHANNEL_ID = os.environ.get("TELEGRAM_DEALS_CHANNEL_ID", "")
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏠 *Welcome to PropertyOS*\n\n"
-        "Your Singapore property intelligence assistant.\n\n"
-        "*Commands:*\n"
-        "/deals — Today's below-market opportunities\n"
+        "🏠 *Welcome to PropOS — Singapore Property Intelligence*\n\n"
+        "*Free commands:*\n"
+        "/subscribe — Subscribe to daily digest\n"
+        "/hdb [town] [type] — HDB below-market deals\n"
+        "/deals — Private condo deals\n"
         "/news — Market sentiment + top stories\n"
-        "/value D15 1000 1500000 — Value a property\n"
-        "  (district area_sqft asking_price)\n"
+        "/value [district] [sqft] [price] — Quick valuation\n"
         "/status — System status\n\n"
-        "📊 Full dashboard: propertyos.sg\n"
-        "💡 Free plan: 3 alerts/week | Premium: unlimited",
+        "Examples:\n"
+        "`/hdb TAMPINES 4 ROOM`\n"
+        "`/value 15 1000 1500000`\n\n"
+        "📊 Full dashboard (free): https://acepropos.duckdns.org\n"
+        "🔔 Set price alerts in the Watchlist tab",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -141,6 +145,68 @@ async def cmd_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Invalid input. Try: /value 15 1000 1500000\nError: {e}")
 
 
+async def cmd_hdb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    /hdb [town] [flat_type]
+    Show top 3 below-market HDB deals. Free command — acquisition funnel.
+    """
+    args = ctx.args
+    town = args[0].upper().replace("-", " ") if args else None
+    flat_type = " ".join(args[1:]).upper() if len(args) > 1 else None
+
+    await update.message.reply_text("🔍 Scanning HDB resale transactions...")
+    try:
+        deals = find_below_market_hdb(town=town, flat_type=flat_type, threshold_pct=5.0, limit=5)
+        if not deals:
+            await update.message.reply_text(
+                "No below-market HDB deals found" +
+                (f" in {town}" if town else "") + " right now. Try /hdb TAMPINES or /hdb WOODLANDS 4-ROOM"
+            )
+            return
+
+        lines = [f"🏠 *HDB Below-Market Deals*" + (f" — {town}" if town else "") + "\n"]
+        for i, d in enumerate(deals[:3], 1):
+            lines.append(
+                f"*{i}. {d['town']} — {d['flat_type']}*\n"
+                f"  📍 {d['block']} {d['street_name']}, {d.get('storey_range','')}\n"
+                f"  💰 SGD {d['resale_price']:,.0f} ({d['discount_pct']:.1f}% below median PSF)\n"
+                f"  📐 {d['floor_area_sqm']:.0f} sqm | PSF: SGD {d['psf']:,.0f} vs SGD {d['median_psf']:,.0f}\n"
+            )
+        lines.append("🔓 [Full deal feed + alerts →](https://acepropos.duckdns.org)")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+
+    except Exception as e:
+        log.error(f"cmd_hdb error: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_subscribe(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Public subscribe command — captures user into funnel."""
+    chat_id = update.effective_chat.id
+    username = update.effective_user.username or "unknown"
+    name = update.effective_user.first_name or "there"
+
+    # Log subscriber (in production, write to DB)
+    log.info(f"New subscriber: {chat_id} (@{username})")
+
+    await update.message.reply_text(
+        f"👋 Hi {name}! You're now subscribed to *PropOS Daily*.\n\n"
+        f"*What you'll get (free):*\n"
+        f"• 📊 Daily market sentiment at 8 AM SGT\n"
+        f"• 🏠 Top 3 HDB below-market deals daily\n"
+        f"• 🚨 Policy change alerts\n\n"
+        f"*Available commands:*\n"
+        f"/hdb [town] — HDB deal scanner\n"
+        f"/deals — Private condo deals\n"
+        f"/news — Market sentiment\n"
+        f"/value [district] [sqft] [price] — Quick valuation\n\n"
+        f"📊 Full dashboard (free): https://acepropos.duckdns.org\n"
+        f"💡 Your Telegram ID: `{chat_id}` — use this in the Watchlist tab for personalised alerts.",
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True,
+    )
+
+
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from core.llm_router import get_current_mode, get_token_summary
     mode = get_current_mode()
@@ -160,19 +226,41 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── Scheduled: Daily public channel post ──────────────────────────────────────
 
 async def post_daily_briefing(bot: Bot):
-    """Post daily market briefing to public channel. Called by cron at 8 AM SGT."""
+    """Post daily market briefing + top HDB deals to public channel. Called by cron at 8 AM SGT."""
     if not DEALS_CHANNEL_ID:
         log.warning("TELEGRAM_DEALS_CHANNEL_ID not set — skipping channel post")
         return
     try:
+        # Part 1: news sentiment
         agent = NewsIntelAgent()
-        msg = agent.format_telegram_daily()
+        news_msg = agent.format_telegram_daily()
         await bot.send_message(
             chat_id=DEALS_CHANNEL_ID,
-            text=msg,
+            text=news_msg,
             parse_mode=ParseMode.MARKDOWN,
             disable_web_page_preview=True,
         )
+
+        # Part 2: top 3 HDB deals
+        try:
+            deals = find_below_market_hdb(threshold_pct=5.0, limit=3)
+            if deals:
+                lines = ["🏠 *Today's Top HDB Deals*\n"]
+                for d in deals:
+                    lines.append(
+                        f"• *{d['town']} {d['flat_type']}* — {d['discount_pct']:.1f}% below median\n"
+                        f"  SGD {d['resale_price']:,.0f} | PSF {d['psf']:,.0f} vs {d['median_psf']:,.0f} | {d['floor_area_sqm']:.0f} sqm"
+                    )
+                lines.append("\n🔓 [Set up price alerts →](https://acepropos.duckdns.org)")
+                await bot.send_message(
+                    chat_id=DEALS_CHANNEL_ID,
+                    text="\n".join(lines),
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=True,
+                )
+        except Exception as e:
+            log.warning(f"HDB deals section skipped: {e}")
+
         log.info("Daily briefing posted to channel")
     except Exception as e:
         log.error(f"Daily briefing failed: {e}")
@@ -216,6 +304,8 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
+    app.add_handler(CommandHandler("hdb", cmd_hdb))
     app.add_handler(CommandHandler("deals", cmd_deals))
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("value", cmd_value))

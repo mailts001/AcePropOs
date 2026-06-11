@@ -186,6 +186,8 @@ echo "[8/8] Installing cron jobs..."
 0 * * * * cd /root/propos && .venv/bin/python scripts/sync_news.py >> logs/cron.log 2>&1
 # Watchlist price alerts every hour (15 min offset to avoid clash)
 15 * * * * cd /root/propos && .venv/bin/python scripts/run_watchlist_check.py >> logs/cron.log 2>&1
+# Daily digest Mon-Fri 8AM SGT = midnight UTC
+0 0 * * 1-5 cd /root/propos && .venv/bin/python scripts/send_daily_digest.py >> logs/cron.log 2>&1
 # HDB sync weekly, Sun 2AM SGT = Sat 18:00 UTC
 0 18 * * 6 cd /root/propos && .venv/bin/python scripts/sync_hdb.py >> logs/cron.log 2>&1
 # URA sync daily 3AM SGT = 19:00 UTC
