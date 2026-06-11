@@ -478,17 +478,61 @@ elif tab_select == "📊 Deal Feed":
 
     with deal_tab3:
         st.subheader("🏢 Private Condo Deal Scanner")
-        st.info(
-            "**Requires Singapore VPS deployment.**\n\n"
-            "URA's private transaction API (PMI_Resi_Transaction) is blocked from non-Singapore IPs. "
-            "Once PropOS is deployed to a Hetzner CPX12 Singapore VPS, this scanner will:\n\n"
-            "• Scan all 28 districts for condos/apartments trading below district median PSF\n"
-            "• Flag deals ≥8% below median as opportunities\n"
-            "• Show project name, street, discount %, potential upside SGD, and AI deal summary\n"
-            "• Cover new launches, subsale, and resale across freehold and leasehold\n\n"
-            "**To unlock:** Order Hetzner CPX12 Singapore → `python scripts/sync_ura.py` → restart dashboard."
-        )
-        st.caption("HDB deals above are fully functional now — private condo data needs Singapore IP for URA API access.")
+
+        # Check if URA cache exists
+        _ura_cache = ROOT / "cache" / "ura" / "transactions_batch1.json"
+        if _ura_cache.exists():
+            try:
+                import json as _json
+                _ura_data = _json.loads(_ura_cache.read_text())
+                _txns = _ura_data.get("transactions", [])
+                if _txns:
+                    # Show real deals from cache
+                    import pandas as _pd, statistics as _stats
+                    from collections import defaultdict as _dd
+                    _by_district: dict = _dd(list)
+                    for t in _txns:
+                        d = str(t.get("district", ""))
+                        psf = t.get("psf_sgd", 0)
+                        if d and psf and psf > 0:
+                            _by_district[d].append(t)
+
+                    _threshold = st.slider("Deal threshold: % below district median PSF", 5, 20, 8, key="ura_thresh")
+                    _deals = []
+                    for dist, txns in _by_district.items():
+                        psfs = [t["psf_sgd"] for t in txns if t.get("psf_sgd", 0) > 0]
+                        if len(psfs) < 5:
+                            continue
+                        med = _stats.median(psfs)
+                        for t in txns:
+                            disc = (med - t["psf_sgd"]) / med * 100
+                            if disc >= _threshold:
+                                t["median_psf"] = round(med, 0)
+                                t["discount_pct"] = round(disc, 1)
+                                t["upside_sgd"] = round((med - t["psf_sgd"]) * t.get("area_sqft", 0), 0)
+                                _deals.append(t)
+
+                    _deals.sort(key=lambda x: x["discount_pct"], reverse=True)
+                    st.success(f"**{len(_deals)} private condo deals** found {_threshold}%+ below district median PSF")
+                    for d in _deals[:10]:
+                        with st.expander(f"🟢 {d['project']} — D{d['district']} · {d['discount_pct']}% below median"):
+                            c1, c2, c3, c4 = st.columns(4)
+                            c1.metric("Price", f"SGD {d['price_sgd']:,.0f}")
+                            c2.metric("PSF", f"SGD {d['psf_sgd']:,.0f}")
+                            c3.metric("Median PSF", f"SGD {d['median_psf']:,.0f}")
+                            c4.metric("Potential upside", f"SGD {d['upside_sgd']:,.0f}")
+                            st.caption(f"{d.get('street','')} · {d.get('area_sqft',0):.0f} sqft · {d.get('property_type','')} · {d.get('tenure','')} · {d.get('contract_date','')}")
+                else:
+                    st.warning("URA cache is empty. Run: `python scripts/sync_ura.py` on the VPS to fetch data.")
+            except Exception as _e:
+                st.error(f"Error reading URA cache: {_e}")
+        else:
+            st.info(
+                "Private condo data not yet synced. On the VPS, run:\n\n"
+                "```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```\n\n"
+                "This fetches all 28 districts from URA. Takes ~2 minutes. "
+                "After that, deals will appear here automatically."
+            )
 
 # ── Valuation ─────────────────────────────────────────────────────────────────
 elif tab_select == "🔍 Valuation":
@@ -1488,14 +1532,38 @@ elif tab_select == "🏦 Mortgage":
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 elif tab_select == "🔔 Watchlist":
     st.header("🔔 Property Watchlist & Price Alerts")
-    st.caption("Save search criteria and get alerted when HDB transactions match — especially below-market deals.")
+
+    with st.expander("ℹ️ How to use Watchlist alerts", expanded=False):
+        st.markdown("""
+**What it does**
+
+Set up a saved search (e.g. *Tampines 4-room under SGD 600,000*). Every hour, PropOS automatically scans the latest HDB resale transactions and alerts you when a matching deal appears — especially ones priced below the market median.
+
+**Step-by-step:**
+1. **Enter your Telegram ID** below (get it by messaging @userinfobot on Telegram)
+2. Go to **➕ Add Watch** → set your town, flat type, max price, and alert threshold
+3. Save it — PropOS checks automatically every hour
+4. You'll receive a Telegram message via **@askAceBot** when a match is found
+
+**Alert threshold explained**
+
+- Set to **0%** → alert on any transaction matching your criteria
+- Set to **5%** → only alert when PSF is 5% or more below the town median (deals only)
+- Set to **10%+** → only the sharpest deals
+
+**Your Telegram ID**
+
+Open Telegram → message **@userinfobot** → it replies with your numeric ID (e.g. `1245366658`). Enter that below to receive alerts.
+
+> ⚠️ Currently covers **HDB resale transactions** only. Private condo watchlist coming soon.
+        """)
 
     init_watchlist_db()
 
-    # Use session telegram ID or a guest ID
     _user_id = st.text_input(
-        "Your Telegram ID (for alerts) — or leave as 'guest' to just browse",
-        value=str(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "guest")),
+        "Your Telegram ID (for alerts) — message @userinfobot to find yours",
+        value=str(os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")),
+        placeholder="e.g. 1245366658",
         key="wl_user_id",
     )
 
@@ -1697,8 +1765,8 @@ elif tab_select == "🏗️ BTO":
             df_bto = df_bto[df_bto["town"].str.len() > 0] if "town" in df_bto.columns else df_bto
             st.dataframe(df_bto, use_container_width=True)
         else:
-            st.info("No launch history cached yet. Data loads from data.gov.sg automatically.")
-            if st.button("🔄 Fetch BTO History", key="bto_refresh"):
+            st.info("Launch history is loading — check back shortly.")
+            if st.button("🔄 Refresh", key="bto_refresh"):
                 from data.bto_pipeline import fetch_bto_launches
                 try:
                     records = fetch_bto_launches(force=True)
