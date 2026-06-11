@@ -106,7 +106,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={
-        "Get Help": "https://t.me/AcePropOs_Ch",
+        "Get Help": "https://t.me/askAceBot",
         "Report a bug": "mailto:mailtsjp@gmail.com",
         "About": (
             "## PropOS — Singapore Property Intelligence\n\n"
@@ -351,7 +351,7 @@ with st.sidebar:
     st.divider()
     tab_select = st.radio(
         "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "🔔 Watchlist", "🏗️ BTO", "⚙️ Admin"],
+        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO", "⚙️ Admin"],
     )
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
@@ -1669,6 +1669,209 @@ elif tab_select == "🏦 Mortgage":
             )
             if st.button("💬 Run MRTA Analysis", key="mrta_from_aff"):
                 st.info("Head to the 🛡️ Insurance tab → Analyse to build your full insurance portfolio including MRTA/MLTA coverage.")
+
+# ── Tools (Stamp Duty + ROI + Affordability) ──────────────────────────────────
+elif tab_select == "💹 Tools":
+    from data.stamp_duty import full_stamp_duty, calc_ssd, ABSD_RATES
+    from data.roi_projector import project_roi, affordability_planner, GROSS_YIELD_BENCHMARKS
+    import pandas as _pd
+
+    st.header("💹 Property Calculators")
+
+    tool_tab1, tool_tab2, tool_tab3 = st.tabs([
+        "🏷️ Stamp Duty (ABSD/BSD)", "📈 Investment ROI", "🧮 Affordability Planner"
+    ])
+
+    # ── Stamp Duty ─────────────────────────────────────────────────────────────
+    with tool_tab1:
+        st.subheader("Stamp Duty Calculator")
+        st.caption("Rates effective Feb 2023. BSD applies to all buyers. ABSD is additional based on profile and property count.")
+
+        sd1, sd2 = st.columns(2)
+        sd_price = sd1.number_input("Purchase Price (SGD)", value=1_000_000, step=50_000, min_value=100_000, key="sd_price")
+        sd_profile = sd1.selectbox("Buyer Profile", ["SC", "SPR", "Foreigner", "Entity"],
+            format_func=lambda x: {"SC":"🇸🇬 Singapore Citizen","SPR":"🟢 PR","Foreigner":"🌍 Foreigner","Entity":"🏢 Company/Trust"}[x], key="sd_prof")
+        sd_count = sd2.selectbox("Property count after this purchase",
+            [1, 2, 3], format_func=lambda x: {1:"1st property",2:"2nd property",3:"3rd or more"}[x], key="sd_count")
+        sd_hdb = sd2.checkbox("HDB flat?", value=False, key="sd_hdb")
+        sd_sell = sd2.checkbox("Planning to sell within 3 years? (SSD)", value=False, key="sd_sell")
+        sd_hold = None
+        if sd_sell:
+            sd_hold = sd2.slider("Expected hold period (months)", 1, 36, 24, key="sd_hold")
+
+        sd_result = full_stamp_duty(sd_price, sd_profile, sd_count, sd_hdb)
+
+        st.divider()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("BSD", f"SGD {sd_result['bsd']['total_bsd_sgd']:,.0f}", f"{sd_result['bsd']['effective_rate_pct']}%")
+        m2.metric("ABSD", f"SGD {sd_result['absd']['total_absd_sgd']:,.0f}", f"{sd_result['absd']['absd_rate_pct']:.0f}%")
+        m3.metric("Total Stamp Duty", f"SGD {sd_result['total_stamp_duty_sgd']:,.0f}", f"{sd_result['effective_total_rate_pct']}%")
+        m4.metric("Total Cash Upfront", f"SGD {sd_result['total_upfront_cash_sgd']:,.0f}",
+                  help="Downpayment + stamp duties. All in cash (no CPF for stamp duties).")
+
+        if sd_sell and sd_hold:
+            ssd = calc_ssd(sd_price, sd_hold)
+            if ssd["total_ssd_sgd"] > 0:
+                st.warning(f"⚠️ **SSD applies:** SGD {ssd['total_ssd_sgd']:,.0f} ({ssd['rate_pct']:.0f}%) — {ssd['note']}")
+            else:
+                st.success("✅ No SSD — held more than 3 years.")
+
+        for note in sd_result["absd"]["notes"]:
+            st.info(f"ℹ️ {note}")
+
+        with st.expander("BSD breakdown by band"):
+            bsd_rows = [{
+                "Band": b["band"], "Rate": f"{b['rate_pct']:.0f}%",
+                "Taxable (SGD)": f"{b['taxable_sgd']:,.0f}",
+                "Duty (SGD)": f"{b['duty_sgd']:,.0f}",
+            } for b in sd_result["bsd"]["breakdown"]]
+            st.dataframe(_pd.DataFrame(bsd_rows), use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.markdown("**Quick ABSD Reference**")
+        absd_rows = []
+        for profile, rates in ABSD_RATES.items():
+            absd_rows.append({
+                "Profile": {"SC":"🇸🇬 SC","SPR":"🟢 SPR","Foreigner":"🌍 Foreigner","Entity":"🏢 Entity"}.get(profile, profile),
+                "1st Property": f"{rates[1]*100:.0f}%",
+                "2nd Property": f"{rates[2]*100:.0f}%",
+                "3rd+ Property": f"{rates[3]*100:.0f}%",
+            })
+        st.dataframe(_pd.DataFrame(absd_rows), use_container_width=True, hide_index=True)
+        st.caption("Source: IRAS. Rates as of Feb 2023 cooling measures.")
+
+    # ── Investment ROI ─────────────────────────────────────────────────────────
+    with tool_tab2:
+        st.subheader("Investment ROI Projector")
+        st.caption("Model rental income, holding costs, mortgage, and capital gain scenarios to see your real return.")
+
+        r1, r2 = st.columns(2)
+        roi_price = r1.number_input("Purchase Price (SGD)", value=1_200_000, step=50_000, min_value=200_000, key="roi_price")
+        roi_ltv = r1.slider("Loan-to-Value %", 0, 75, 75, key="roi_ltv")
+        roi_rate = r1.number_input("Mortgage Rate (% p.a.)", value=3.68, step=0.05, key="roi_rate")
+        roi_tenure = r1.slider("Loan Tenure (years)", 5, 30, 25, key="roi_ten")
+        roi_rent = r2.number_input("Expected Monthly Rent (SGD)", value=4_500, step=100, key="roi_rent")
+        roi_type = r2.selectbox("Property Type", list(GROSS_YIELD_BENCHMARKS.keys()), key="roi_type")
+        roi_hold = r2.slider("Planned Hold Period (years)", 2, 20, 5, key="roi_hold")
+        roi_absd = r2.number_input("ABSD paid (SGD, 0 if none)", value=0, step=10_000, key="roi_absd")
+        roi_bsd = r2.number_input("BSD paid (SGD)", value=0, step=1_000, key="roi_bsd")
+
+        if st.button("Project Returns", type="primary", key="roi_btn"):
+            loan = roi_price * roi_ltv / 100
+            res = project_roi(roi_price, loan, roi_rate, roi_tenure, roi_rent,
+                              roi_type, roi_hold, roi_absd, roi_bsd)
+
+            st.divider()
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Gross Yield", f"{res['gross_yield_pct']:.2f}%")
+            p2.metric("Net Yield", f"{res['net_yield_pct']:.2f}%")
+            p3.metric("Monthly Cash Flow", f"SGD {res['monthly_cashflow_sgd']:,.0f}",
+                      delta="positive" if res["cashflow_positive"] else "negative",
+                      delta_color="normal" if res["cashflow_positive"] else "inverse")
+            p4.metric("Equity Invested", f"SGD {res['equity_invested']:,.0f}")
+
+            bench = res["yield_benchmark"]
+            if res["gross_yield_pct"] >= bench["market_mid_pct"]:
+                st.success(f"✅ Yield is **{res['gross_yield_pct']:.2f}%** — above market median of {bench['market_mid_pct']}% for {roi_type}.")
+            else:
+                st.warning(f"⚠️ Yield is **{res['gross_yield_pct']:.2f}%** — below market median of {bench['market_mid_pct']}% for {roi_type}. Consider negotiating price or raising rent.")
+
+            st.divider()
+            st.markdown(f"#### Capital Gain Scenarios over {roi_hold} years")
+            scen_rows = []
+            for k, s in res["capital_scenarios"].items():
+                scen_rows.append({
+                    "Scenario": s["label"],
+                    "Appreciation": f"{s['annual_appreciation_pct']}%/yr",
+                    "Future Value": f"SGD {s['future_value_sgd']:,.0f}",
+                    "Capital Gain": f"SGD {s['capital_gain_sgd']:,.0f}",
+                    "Rental Income": f"SGD {s['total_rental_income_sgd']:,.0f}",
+                    "Total Return": f"SGD {s['total_return_sgd']:,.0f}",
+                    "ROI (leveraged)": f"{s['roi_leveraged_pct']:.1f}%",
+                    "Annualised": f"{s['annualised_roi_pct']:.1f}%/yr",
+                })
+            st.dataframe(_pd.DataFrame(scen_rows), use_container_width=True, hide_index=True)
+
+            with st.expander("Annual cost breakdown"):
+                costs = res["annual_costs_breakdown"]
+                cost_rows = [
+                    {"Cost item": "Property tax (investment)", "Annual SGD": f"{costs['property_tax_sgd']:,.0f}"},
+                    {"Cost item": "Maintenance / S&CC", "Annual SGD": f"{costs['maintenance_sgd']:,.0f}"},
+                    {"Cost item": "Insurance", "Annual SGD": f"{costs['insurance_sgd']:,.0f}"},
+                    {"Cost item": "Vacancy allowance (1 mo/yr)", "Annual SGD": f"{costs['vacancy_allowance_sgd']:,.0f}"},
+                    {"Cost item": "Agent fees", "Annual SGD": f"{costs['agent_fees_sgd']:,.0f}"},
+                    {"Cost item": "Repairs & maintenance", "Annual SGD": f"{costs['repairs_sgd']:,.0f}"},
+                    {"Cost item": "**Total costs**", "Annual SGD": f"**{costs['total_sgd']:,.0f}**"},
+                ]
+                st.dataframe(_pd.DataFrame(cost_rows), use_container_width=True, hide_index=True)
+
+            if res["payback_years"]:
+                st.info(f"💡 Estimated full payback (equity recovered via cashflow + capital gain): **{res['payback_years']} years** under base scenario.")
+
+            # MRTA nudge
+            st.divider()
+            st.markdown("### 🛡️ Protect this investment")
+            st.markdown(
+                f"With SGD {loan:,.0f} in mortgage financing, an MRTA policy ensures "
+                f"your family keeps this investment property — not just the liability — if you're unable to service the loan. "
+                f"Typical cost: SGD 2,000–5,000 one-time premium."
+            )
+
+    # ── Affordability Planner ──────────────────────────────────────────────────
+    with tool_tab3:
+        st.subheader("Affordability Planner")
+        st.caption("Enter your income, CPF, and savings to find your maximum purchase price.")
+
+        a1, a2 = st.columns(2)
+        aff_income = a1.number_input("Gross monthly income (SGD)", value=8_000, step=500, key="aff2_inc")
+        aff_cpf = a1.number_input("Monthly CPF OA contribution (SGD)", value=800, step=100, key="aff2_cpf")
+        aff_cash = a1.number_input("Cash savings available (SGD)", value=150_000, step=10_000, key="aff2_cash")
+        aff_profile = a2.selectbox("Buyer profile", ["SC", "SPR", "Foreigner"],
+            format_func=lambda x: {"SC":"🇸🇬 Singapore Citizen","SPR":"🟢 PR","Foreigner":"🌍 Foreigner"}[x], key="aff2_prof")
+        aff_count = a2.selectbox("This will be my...", [1, 2, 3],
+            format_func=lambda x: {1:"1st property",2:"2nd property",3:"3rd+ property"}[x], key="aff2_cnt")
+        aff_hdb2 = a2.checkbox("Looking at HDB?", value=True, key="aff2_hdb")
+        aff_tenure2 = a2.slider("Preferred loan tenure", 10, 30, 25, key="aff2_ten")
+        aff_rate2 = a2.number_input("Expected rate (% p.a.)", value=3.68 if not aff_hdb2 else 2.60, step=0.05, key="aff2_rate")
+
+        if st.button("Calculate Max Budget", type="primary", key="aff2_btn"):
+            res = affordability_planner(aff_income, aff_cpf, aff_cash,
+                                        aff_hdb2, aff_profile, aff_count,
+                                        aff_tenure2, aff_rate2)
+            st.divider()
+            b1, b2, b3 = st.columns(3)
+            b1.metric("Max Purchase Price", f"SGD {res['max_purchase_price_sgd']:,.0f}")
+            b2.metric("Monthly Repayment", f"SGD {res['monthly_repayment_sgd']:,.0f}")
+            b3.metric("Total Cash Needed", f"SGD {res['total_cash_outlay_sgd']:,.0f}")
+
+            st.divider()
+            st.markdown("**How your money is used:**")
+            d1, d2, d3 = st.columns(3)
+            d1.metric("5% Cash Downpayment", f"SGD {res['cash_needed_for_downpayment_sgd']:,.0f}")
+            d2.metric("CPF for Downpayment", f"SGD {res['cpf_for_downpayment_sgd']:,.0f}")
+            d3.metric("Stamp Duties (cash)", f"SGD {res['stamp_duty_cash_sgd']:,.0f}")
+
+            st.info(f"💡 Limit used: **{res['income_limit_used']}**. This is the maximum — staying 10–15% below gives you buffer for rate rises.")
+
+            # Surface deals at this budget
+            st.divider()
+            st.markdown(f"**Looking for HDB deals under SGD {res['max_purchase_price_sgd']:,.0f}?**")
+            try:
+                from data.hdb_pipeline import find_below_market_hdb
+                _budget_deals = find_below_market_hdb(
+                    max_price=res["max_purchase_price_sgd"] * 1.05,
+                    threshold_pct=3.0, limit=3
+                )
+                if _budget_deals:
+                    for d in _budget_deals:
+                        st.markdown(
+                            f"🟢 **{d['town']} {d['flat_type']}** — "
+                            f"SGD {d['resale_price']:,.0f} · {d['discount_pct']:.1f}% below market · "
+                            f"{d['floor_area_sqm']:.0f} sqm"
+                        )
+                    st.caption("From 📊 Deal Feed. Go to Deal Feed tab for full details.")
+            except Exception:
+                st.caption("Head to 📊 Deal Feed to browse properties in your budget.")
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 elif tab_select == "🔔 Watchlist":

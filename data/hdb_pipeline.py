@@ -143,7 +143,9 @@ def get_town_stats(town: str, flat_type: str = "") -> dict:
     }
 
 
-def find_below_market_hdb(threshold_pct: float = 8.0, limit: int = 20) -> list[dict]:
+def find_below_market_hdb(threshold_pct: float = 8.0, limit: int = 20,
+                          town: str | None = None, flat_type: str | None = None,
+                          max_price: float | None = None) -> list[dict]:
     """
     Find recent HDB transactions that were priced significantly below town median.
     Used by DealHunterAgent for HDB opportunity detection.
@@ -174,6 +176,12 @@ def find_below_market_hdb(threshold_pct: float = 8.0, limit: int = 20) -> list[d
 
     opportunities = []
     for r in recent:
+        if town and town.upper() not in r.get("town", "").upper():
+            continue
+        if flat_type and flat_type.upper() not in r.get("flat_type", "").upper():
+            continue
+        if max_price and r.get("resale_price", 0) > max_price:
+            continue
         key = f"{r['town']}|{r['flat_type']}"
         median = medians.get(key, 0)
         if median <= 0 or r["psf_sgd"] <= 0:
