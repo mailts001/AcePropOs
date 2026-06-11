@@ -336,6 +336,8 @@ with st.sidebar:
         "💰 Finance": [
             "🏦 Mortgage",
             "💹 Stamp Duty & ROI",
+            "🎁 CPF Grants",
+            "🏠↔️ Rent vs Buy",
         ],
         "🛡️ Protect": [
             "🛡️ Insurance",
@@ -2936,34 +2938,129 @@ elif tab_select == "⚖️ Compare":
 
 # ── MRT Proximity Map ─────────────────────────────────────────────────────────
 elif tab_select == "🗺️ MRT Map":
-    st.header("🗺️ MRT Connectivity")
-    st.markdown("*Find the nearest MRT/LRT stations to any HDB town or private district. Walk-time estimates and connectivity score included.*")
+    st.header("🗺️ Full Property Research Map")
+    st.markdown("*Search by project name, HDB address, town or postal code. Overlay MRT lines, hawker centres, malls, schools, parks and live transaction hotspots — all on one map.*")
 
-    from data.mrt_proximity import mrt_for_district, mrt_for_town, mrt_score, nearest_mrt, DISTRICT_CENTROIDS, TOWN_CENTROIDS
+    from data.mrt_proximity import mrt_score, nearest_mrt, DISTRICT_CENTROIDS, TOWN_CENTROIDS
+    from data.amenities import nearest_amenities, HAWKER_CENTRES, SHOPPING_MALLS, PRIMARY_SCHOOLS, PARKS
     import pandas as pd
 
-    mrt_type = st.radio("Search by", ["🏠 HDB Town", "🏢 Private District", "📍 Coordinates"], horizontal=True)
+    # ── Search mode ─────────────────────────────────────────────────────────
+    mrt_type = st.radio(
+        "Search by", ["🏠 HDB Town", "🏢 Private District", "🔍 Project / Address Search"],
+        horizontal=True, key="mrt_search_mode"
+    )
+
+    coords = None
+    loc_label = ""
+    search_project_name = None
 
     if mrt_type == "🏠 HDB Town":
-        town_sel = st.selectbox("Select town", sorted(TOWN_CENTROIDS.keys()))
-        stations = mrt_for_town(town_sel, top_n=8)
-        loc_label = town_sel
+        town_sel = st.selectbox("Select HDB town", sorted(TOWN_CENTROIDS.keys()), key="mrt_town")
         coords = TOWN_CENTROIDS.get(town_sel)
-    elif mrt_type == "🏢 Private District":
-        dist_sel = st.number_input("District (1–28)", 1, 28, 9)
-        stations = mrt_for_district(dist_sel, top_n=8)
-        loc_label = f"D{dist_sel}"
-        coords = DISTRICT_CENTROIDS.get(dist_sel)
-    else:
-        c1, c2 = st.columns(2)
-        with c1:
-            lat_in = st.number_input("Latitude", 1.2, 1.5, 1.304, format="%.4f")
-        with c2:
-            lon_in = st.number_input("Longitude", 103.6, 104.0, 103.831, format="%.4f")
-        stations = nearest_mrt(lat_in, lon_in, top_n=8)
-        loc_label = f"{lat_in:.4f}, {lon_in:.4f}"
-        coords = (lat_in, lon_in)
+        loc_label = town_sel
 
+    elif mrt_type == "🏢 Private District":
+        dist_sel = st.number_input("District (1–28)", 1, 28, 9, key="mrt_dist")
+        coords = DISTRICT_CENTROIDS.get(int(dist_sel))
+        loc_label = f"District {dist_sel}"
+
+    else:
+        # Project/Address search using URA cache
+        st.caption("Type a project name (e.g. 'The Interlace', 'Tampines St 45') or 6-digit postal code.")
+        addr_query = st.text_input("Project / block / postal code", placeholder="e.g. Tampines Court or 520123", key="mrt_addr_q")
+
+        # Attempt to resolve from URA project cache
+        _found_coords = None
+        if addr_query and len(addr_query) >= 4:
+            try:
+                from data.ura_pipeline import load_cache
+                _txns = load_cache("transactions")
+                _query_lower = addr_query.strip().lower()
+                # Search by project name (partial match)
+                _matched = [t for t in _txns if _query_lower in t.get("project", "").lower()]
+                if _matched:
+                    # Use x/y coordinates from URA if available, else use district centroid
+                    _match = _matched[0]
+                    _x = float(_match.get("x","0") or 0)
+                    _y = float(_match.get("y","0") or 0)
+                    if _x > 0 and _y > 0:
+                        from data.svy21 import svy21_to_wgs84
+                        _found_coords = svy21_to_wgs84(_x, _y)
+                        loc_label = _match.get("project", addr_query).title()
+                        search_project_name = _match.get("project","")
+                    else:
+                        # Fall back to district centroid
+                        _d = int(_match.get("district", 9) or 9)
+                        _found_coords = DISTRICT_CENTROIDS.get(_d, (1.3521, 103.8198))
+                        loc_label = _match.get("project", addr_query).title()
+                        search_project_name = _match.get("project","")
+            except Exception as _e:
+                st.caption(f"Address search error: {_e}")
+
+            # Postal code fallback: 6 digits → Singapore centroids by first 2 digits
+            if not _found_coords and addr_query.strip().isdigit() and len(addr_query.strip()) == 6:
+                _post_sect = int(addr_query.strip()[:2])
+                _postal_map = {
+                    1: (1.2800,103.8500), 2: (1.2780,103.8420), 3: (1.2890,103.8140),
+                    4: (1.2680,103.8150), 5: (1.3060,103.7800), 6: (1.2940,103.8490),
+                    7: (1.3020,103.8570), 8: (1.3100,103.8560), 9: (1.3060,103.8310),
+                    10: (1.3210,103.8040), 11: (1.3200,103.8380), 12: (1.3310,103.8470),
+                    13: (1.3290,103.8830), 14: (1.3170,103.8910), 15: (1.3050,103.8950),
+                    16: (1.3290,103.9250), 17: (1.3680,103.9700), 18: (1.3550,103.9460),
+                    19: (1.3810,103.8840), 20: (1.3690,103.8480), 21: (1.3340,103.7820),
+                    22: (1.3410,103.7110), 23: (1.3640,103.7590), 24: (1.3980,103.7040),
+                    25: (1.4350,103.7870), 26: (1.4000,103.8250), 27: (1.4290,103.8290),
+                    28: (1.4040,103.8990), 29: (1.3200,103.8900), 30: (1.3300,103.8700),
+                    31: (1.3300,103.8450), 32: (1.3310,103.8480), 33: (1.3320,103.8460),
+                    34: (1.3370,103.8530), 35: (1.3380,103.8540), 36: (1.3360,103.8420),
+                    37: (1.3410,103.8580), 38: (1.3690,103.8880), 39: (1.3720,103.8900),
+                    40: (1.3540,103.9440), 41: (1.3560,103.9450), 42: (1.3480,103.7500),
+                    43: (1.3500,103.7490), 44: (1.3730,103.7440), 45: (1.3850,103.7450),
+                    46: (1.3430,103.7210), 47: (1.3490,103.7070), 48: (1.3380,103.7060),
+                    49: (1.3380,103.6980), 50: (1.3270,103.6780), 51: (1.3730,103.9480),
+                    52: (1.3730,103.9490), 53: (1.3720,103.9480), 54: (1.3730,103.9500),
+                    55: (1.3720,103.9490), 56: (1.3730,103.9500), 57: (1.3710,103.9480),
+                    58: (1.3030,103.7750), 59: (1.3100,103.7640), 60: (1.3050,103.9070),
+                    61: (1.3020,103.9060), 62: (1.3030,103.9070), 63: (1.3015,103.9050),
+                    64: (1.3010,103.9060), 65: (1.2970,103.9100), 66: (1.2960,103.9080),
+                    67: (1.2980,103.9120), 68: (1.2990,103.9050), 69: (1.3010,103.9030),
+                    70: (1.3720,103.8890), 71: (1.3710,103.8880), 72: (1.4290,103.8350),
+                    73: (1.4280,103.8360), 75: (1.3900,103.8960), 76: (1.3910,103.8950),
+                    77: (1.3680,103.8490), 78: (1.3700,103.8500), 79: (1.3680,103.8470),
+                    80: (1.3710,103.8480), 81: (1.3700,103.8460),
+                }
+                _found_coords = _postal_map.get(_post_sect, (1.3521, 103.8198))
+                loc_label = f"Postal {addr_query}"
+
+        if _found_coords:
+            coords = _found_coords
+            st.success(f"📍 Located: **{loc_label}**")
+        elif addr_query:
+            st.warning("Project not found in URA cache. Try a different name or select a town/district above.")
+            coords = (1.3521, 103.8198)
+            loc_label = "Singapore (default)"
+
+    if coords is None:
+        coords = (1.3521, 103.8198)
+        loc_label = "Singapore"
+
+    # ── Overlay toggles ──────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("**🗂️ Map Overlays**")
+    ov_cols = st.columns(6)
+    show_mrt      = ov_cols[0].checkbox("🚇 MRT", value=True,  key="ov_mrt")
+    show_hawker   = ov_cols[1].checkbox("🍜 Hawker", value=False, key="ov_hawker")
+    show_mall     = ov_cols[2].checkbox("🛍️ Mall", value=False, key="ov_mall")
+    show_school   = ov_cols[3].checkbox("🏫 School", value=False, key="ov_school")
+    show_park     = ov_cols[4].checkbox("🌳 Park", value=False, key="ov_park")
+    show_txn      = ov_cols[5].checkbox("💰 Transactions", value=False, key="ov_txn")
+
+    # Radius filter for amenities
+    radius_km = st.slider("Show amenities within (km)", 0.5, 5.0, 2.0, 0.5, key="ov_radius")
+
+    # ── MRT connectivity stats ───────────────────────────────────────────────
+    stations = nearest_mrt(coords[0], coords[1], top_n=8)
     if stations:
         score = mrt_score(stations)
         sc1, sc2, sc3 = st.columns(3)
@@ -2973,58 +3070,210 @@ elif tab_select == "🗺️ MRT Map":
                    delta="Excellent" if score >= 80 else "Good" if score >= 60 else "Fair" if score >= 40 else "Poor",
                    delta_color="normal")
 
-        st.subheader(f"Nearest MRT Stations — {loc_label}")
-        rows = []
-        for s in stations:
-            rows.append({
-                "Station": s["station"],
-                "Line": s["line"],
-                "Distance": f"{s['distance_m']:,} m",
-                "Walk Time": s["walk_label"],
-                "Walkable": "✅" if s["distance_m"] <= 800 else "🚌" if s["distance_m"] <= 1500 else "🚗",
-            })
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    # ── Nearest amenities table ───────────────────────────────────────────────
+    _active_layers = []
+    if show_mrt:     _active_layers.append("mrt")
+    if show_hawker:  _active_layers.append("hawker")
+    if show_mall:    _active_layers.append("mall")
+    if show_school:  _active_layers.append("school")
+    if show_park:    _active_layers.append("park")
 
-        # Visual walk-time bar
-        st.subheader("Walk Time to Each Station")
-        chart_df = pd.DataFrame({
-            "Walk (min)": [s["walk_min"] for s in stations]
-        }, index=[s["station"] for s in stations])
-        st.bar_chart(chart_df, height=220)
+    if len(_active_layers) > 1 or (len(_active_layers) == 1 and _active_layers[0] != "mrt"):
+        _label_map = {"hawker":"🍜 Hawker Centre","mall":"🛍️ Shopping Mall","school":"🏫 Primary School","park":"🌳 Park"}
+        for _layer in [l for l in _active_layers if l != "mrt"]:
+            _nearby = [a for a in nearest_amenities(coords[0], coords[1], _layer, top_n=20)
+                       if a["distance_m"] <= radius_km * 1000]
+            if _nearby:
+                with st.expander(f"{_label_map[_layer]}s within {radius_km:.0f} km — {len(_nearby)} found"):
+                    _df_am = pd.DataFrame([
+                        {"Name": a["name"], "Distance": f"{a['distance_m']:,} m", "Walk": f"{a['walk_min']} min"}
+                        for a in _nearby
+                    ])
+                    st.dataframe(_df_am, hide_index=True, use_container_width=True)
 
-        # Folium map if available
-        try:
-            import folium
-            from streamlit_folium import st_folium
-            m = folium.Map(location=list(coords), zoom_start=15, tiles="CartoDB positron")
-            # Property marker
-            folium.Marker(
-                list(coords), popup=loc_label,
-                icon=folium.Icon(color="red", icon="home", prefix="fa")
-            ).add_to(m)
-            # MRT markers
-            for s in stations:
-                color = "blue" if s["distance_m"] <= 800 else "gray"
-                folium.Marker(
-                    [s["lat"], s["lon"]],
-                    popup=f"{s['station']} ({s['line']}) — {s['walk_label']}",
-                    tooltip=s["station"],
-                    icon=folium.Icon(color=color, icon="train", prefix="fa")
-                ).add_to(m)
-                if s["distance_m"] <= 1500:
+    # ── Folium interactive map ─────────────────────────────────────────────
+    st.subheader(f"📍 {loc_label}")
+    try:
+        import folium
+        from folium.plugins import HeatMap, MarkerCluster
+        from streamlit_folium import st_folium
+
+        _zoom = 15 if mrt_type == "🔍 Project / Address Search" else 14
+        m = folium.Map(location=list(coords), zoom_start=_zoom, tiles="CartoDB positron")
+
+        # — Centre pin -------------------------------------------------------
+        folium.Marker(
+            list(coords), popup=f"<b>{loc_label}</b>",
+            tooltip=loc_label,
+            icon=folium.Icon(color="red", icon="home", prefix="fa")
+        ).add_to(m)
+
+        # — MRT overlay -------------------------------------------------------
+        if show_mrt:
+            from data.mrt_data import MRT_STATIONS, LINE_COLORS
+            _mrt_cluster = MarkerCluster(name="MRT Stations", show=True).add_to(m)
+            for stn_name, stn_line, stn_lat, stn_lon, stn_dist in MRT_STATIONS:
+                _dist = ((stn_lat - coords[0])**2 + (stn_lon - coords[1])**2) ** 0.5 * 111320
+                _color_key = stn_line.split("/")[0][:2]
+                _hex = LINE_COLORS.get(_color_key, "#888888")
+                folium.CircleMarker(
+                    [stn_lat, stn_lon], radius=7,
+                    color=_hex, fill=True, fill_color=_hex, fill_opacity=0.9,
+                    popup=f"<b>{stn_name}</b><br>{stn_line}",
+                    tooltip=f"{stn_name} ({stn_line})"
+                ).add_to(_mrt_cluster)
+            # Lines from centre to nearby MRTs
+            for s in stations[:5]:
+                if s["distance_m"] <= radius_km * 1000:
                     folium.PolyLine(
                         [list(coords), [s["lat"], s["lon"]]],
-                        color=s["color"], weight=2, opacity=0.6, dash_array="5"
+                        color=s["color"], weight=2, opacity=0.7, dash_array="6"
                     ).add_to(m)
-            st_folium(m, height=420, use_container_width=True)
-        except ImportError:
-            st.info("Interactive map requires `folium` and `streamlit-folium`. Install on VPS: `pip install folium streamlit-folium`")
 
-        st.caption("Walk speed: 80 m/min (~4.8 km/h). Distances are straight-line — actual walk may be longer.")
+        # — Hawker overlay ---------------------------------------------------
+        if show_hawker:
+            _h_cluster = MarkerCluster(name="Hawker Centres", show=True).add_to(m)
+            for name, lat, lon in HAWKER_CENTRES:
+                _d = ((lat - coords[0])**2 + (lon - coords[1])**2)**0.5 * 111320
+                if _d <= radius_km * 1000:
+                    folium.Marker(
+                        [lat, lon],
+                        popup=f"<b>🍜 {name}</b><br>{_d/1000:.2f} km away",
+                        tooltip=name,
+                        icon=folium.Icon(color="orange", icon="cutlery", prefix="fa")
+                    ).add_to(_h_cluster)
 
-        # MRT scoring context
-        with st.expander("📖 What does the Connectivity Score mean?"):
-            st.markdown("""
+        # — Mall overlay -----------------------------------------------------
+        if show_mall:
+            _m_cluster = MarkerCluster(name="Shopping Malls", show=True).add_to(m)
+            for name, lat, lon in SHOPPING_MALLS:
+                _d = ((lat - coords[0])**2 + (lon - coords[1])**2)**0.5 * 111320
+                if _d <= radius_km * 1000:
+                    folium.Marker(
+                        [lat, lon],
+                        popup=f"<b>🛍️ {name}</b><br>{_d/1000:.2f} km away",
+                        tooltip=name,
+                        icon=folium.Icon(color="purple", icon="shopping-bag", prefix="fa")
+                    ).add_to(_m_cluster)
+
+        # — School overlay ---------------------------------------------------
+        if show_school:
+            _s_cluster = MarkerCluster(name="Primary Schools", show=True).add_to(m)
+            for name, lat, lon in PRIMARY_SCHOOLS:
+                _d = ((lat - coords[0])**2 + (lon - coords[1])**2)**0.5 * 111320
+                if _d <= radius_km * 1000:
+                    folium.Marker(
+                        [lat, lon],
+                        popup=f"<b>🏫 {name}</b><br>{_d/1000:.2f} km away",
+                        tooltip=name,
+                        icon=folium.Icon(color="green", icon="graduation-cap", prefix="fa")
+                    ).add_to(_s_cluster)
+
+        # — Park overlay -----------------------------------------------------
+        if show_park:
+            for name, lat, lon in PARKS:
+                _d = ((lat - coords[0])**2 + (lon - coords[1])**2)**0.5 * 111320
+                if _d <= radius_km * 1000:
+                    folium.Marker(
+                        [lat, lon],
+                        popup=f"<b>🌳 {name}</b>",
+                        tooltip=name,
+                        icon=folium.Icon(color="darkgreen", icon="tree", prefix="fa")
+                    ).add_to(m)
+
+        # — Transaction heatmap overlay --------------------------------------
+        if show_txn:
+            try:
+                from data.ura_pipeline import load_cache
+                from data.svy21 import svy21_to_wgs84
+                _all_txns = load_cache("transactions")
+                _heat_pts = []
+                _txn_markers = []
+                _rad_m = radius_km * 1000
+                for _t in _all_txns:
+                    try:
+                        _x = float(_t.get("x","0") or 0)
+                        _y = float(_t.get("y","0") or 0)
+                        if _x > 0 and _y > 0:
+                            _tlat, _tlon = svy21_to_wgs84(_x, _y)
+                        else:
+                            continue
+                        _d = ((_tlat - coords[0])**2 + (_tlon - coords[1])**2)**0.5 * 111320
+                        if _d > _rad_m:
+                            continue
+                        _psf = float(_t.get("psf","0") or _t.get("price_psf","0") or 0)
+                        _heat_pts.append([_tlat, _tlon, min(_psf / 3000, 1.0)])
+                        if len(_txn_markers) < 50:
+                            _txn_markers.append((_tlat, _tlon, _t))
+                    except Exception:
+                        continue
+                if _heat_pts:
+                    HeatMap(_heat_pts, radius=20, blur=15, min_opacity=0.3).add_to(m)
+                # Dot markers for nearest 30 transactions
+                for _tlat, _tlon, _t in _txn_markers[:30]:
+                    _psf = float(_t.get("psf","0") or 0)
+                    _price = float(_t.get("price","0") or 0)
+                    _proj = _t.get("project","")
+                    _area = _t.get("area","")
+                    _date = _t.get("contractDate","")
+                    _popup_html = (
+                        f"<b>{_proj}</b><br>"
+                        f"PSF: <b>${_psf:,.0f}</b><br>"
+                        f"Price: ${_price:,.0f}<br>"
+                        f"Area: {_area} sqft<br>"
+                        f"Date: {_date}"
+                    )
+                    _dot_color = (
+                        "darkred" if _psf >= 2500 else
+                        "red" if _psf >= 2000 else
+                        "orange" if _psf >= 1500 else
+                        "blue" if _psf >= 1000 else "lightblue"
+                    )
+                    folium.CircleMarker(
+                        [_tlat, _tlon], radius=5,
+                        color=_dot_color, fill=True, fill_color=_dot_color, fill_opacity=0.7,
+                        popup=folium.Popup(_popup_html, max_width=220),
+                        tooltip=f"{_proj} — ${_psf:,.0f} psf"
+                    ).add_to(m)
+                if not _heat_pts:
+                    st.caption("No URA transactions with coordinates found within range.")
+            except Exception as _te:
+                st.caption(f"Transaction overlay error: {_te}")
+
+        folium.LayerControl().add_to(m)
+        st_folium(m, height=520, use_container_width=True)
+
+        # Legend
+        _legend_items = []
+        if show_mrt:      _legend_items.append("🔵 MRT station · dashed line = walking distance")
+        if show_hawker:   _legend_items.append("🟠 Hawker centre")
+        if show_mall:     _legend_items.append("🟣 Shopping mall")
+        if show_school:   _legend_items.append("🟢 Primary school")
+        if show_park:     _legend_items.append("🌿 Park / nature reserve")
+        if show_txn:      _legend_items.append("💰 Transaction dot: 🔴 ≥$2k psf · 🟠 ≥$1.5k · 🔵 <$1.5k psf · heatmap = density")
+        if _legend_items:
+            st.caption("  ·  ".join(_legend_items))
+
+    except ImportError:
+        st.info("Interactive map requires `folium` and `streamlit-folium`. Install on VPS: `pip install folium streamlit-folium`")
+        # Fallback: MRT table
+        if stations:
+            rows = []
+            for s in stations:
+                rows.append({
+                    "Station": s["station"],
+                    "Line": s["line"],
+                    "Distance": f"{s['distance_m']:,} m",
+                    "Walk Time": s["walk_label"],
+                    "Walkable": "✅" if s["distance_m"] <= 800 else "🚌" if s["distance_m"] <= 1500 else "🚗",
+                })
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    st.caption("Walk speed: 80 m/min (~4.8 km/h). Straight-line distance — actual walk may be longer.")
+
+    # MRT scoring context
+    with st.expander("📖 What does the Connectivity Score mean?"):
+        st.markdown("""
 | Score | Rating | Meaning |
 |---|---|---|
 | 80–100 | 🟢 Excellent | ≤400m walk to MRT — premium connectivity, commands higher resale/rental |
@@ -3033,7 +3282,9 @@ elif tab_select == "🗺️ MRT Map":
 | <40 | 🔴 Poor | >1,200m — car-dependent, negative impact on yield and resale |
 
 **Rule of thumb:** Each additional 100m from MRT reduces rental yield by ~0.05–0.1% and resale premium by ~1–2%.
-            """)
+**School proximity** adds 5–15% premium to resale prices in primary school P1 registration zones.
+**Hawker centre within 500m** correlates with higher HDB rental demand (+3–7% yield).
+        """)
 
 # ── Portfolio Tracker ──────────────────────────────────────────────────────────
 elif tab_select == "💼 Portfolio":
@@ -3164,6 +3415,200 @@ elif tab_select == "💼 Portfolio":
                         "Purchase Price": [p["purchase_price"] for p in summary["properties"]],
                     }, index=[p["property_name"][:25] for p in summary["properties"]])
                     st.bar_chart(chart_data, height=250)
+
+# ── CPF Housing Grants Calculator ─────────────────────────────────────────────
+elif tab_select == "🎁 CPF Grants":
+    st.header("🎁 CPF Housing Grants Calculator")
+    st.markdown("*Find out which CPF housing grants you qualify for. Covers EHG, Family Grant, PHG and Step-Up Grant (2024 rules). Zero cost — fully rule-based.*")
+
+    from agents.cpf_grants import calculate_grants_dict
+    import pandas as pd
+
+    g1, g2 = st.columns(2)
+    with g1:
+        cg_applicant = st.selectbox("Applicant type", ["couple", "family", "single"], key="cg_app")
+        cg_first_main = st.checkbox("I am a first-timer (never bought subsidised flat)", value=True, key="cg_f1")
+        cg_first_partner = st.checkbox("Partner is also a first-timer", value=True, key="cg_f2",
+                                        help="Uncheck if partner previously bought HDB / received grant")
+        cg_citizenship = st.selectbox("Citizenship status", ["SC+SC","SC+PR","SC_only"], key="cg_cit",
+                                       help="SC = Singapore Citizen, PR = Permanent Resident")
+    with g2:
+        cg_income = st.number_input("Combined monthly household income (SGD)", 0, 30000, 6000, step=500, key="cg_income",
+                                     help="Gross monthly salary of all buyers")
+        cg_flat_type = st.selectbox("Flat type", ["resale","BTO"], key="cg_ftype")
+        cg_flat_size = st.selectbox("Flat size", ["2-room","3-room","4-room","5-room","executive"], key="cg_fsize")
+        cg_near = st.checkbox("Buying near / with parents (within 4 km)", key="cg_near")
+        cg_same_town = st.checkbox("Same town as parents (live together)", key="cg_town") if cg_near else False
+
+    if st.button("Calculate Grants 🎁", type="primary", key="cg_calc"):
+        _gr = calculate_grants_dict(
+            applicant_type=cg_applicant,
+            first_timer_main=cg_first_main,
+            first_timer_partner=cg_first_partner,
+            citizenship=cg_citizenship,
+            monthly_income=float(cg_income),
+            flat_type=cg_flat_type,
+            flat_size=cg_flat_size,
+            near_parents=cg_near,
+            same_town=cg_same_town,
+        )
+        st.divider()
+        ga, gb, gc, gd = st.columns(4)
+        ga.metric("EHG", f"${_gr['ehg']:,}" if _gr['ehg'] else "—")
+        gb.metric("Family Grant", f"${_gr['family_grant']:,}" if _gr['family_grant'] else "—")
+        gc.metric("PHG", f"${_gr['phg']:,}" if _gr['phg'] else "—")
+        gd.metric("Step-Up", f"${_gr['step_up']:,}" if _gr['step_up'] else "—")
+
+        if _gr['total'] > 0:
+            st.success(f"## 🎉 Total Grants: **SGD {_gr['total']:,}**")
+        else:
+            st.warning("No grants applicable based on the inputs provided.")
+
+        for _line in _gr['breakdown']:
+            st.markdown(_line)
+
+        if _gr['notes']:
+            with st.expander("ℹ️ Eligibility notes"):
+                for _n in _gr['notes']:
+                    st.markdown(f"- {_n}")
+
+        with st.expander("📖 Grant details & conditions"):
+            st.markdown("""
+**Enhanced CPF Housing Grant (EHG)**
+- For first-timer singles (income ≤$4,500) or couples/families (income ≤$9,000)
+- Applies to BTO and resale flats
+- Up to **$80,000** for couples, **$40,000** for singles
+- Grant tapers by $5,000 per $500 income band
+
+**CPF Housing Grant / Family Grant** (resale only)
+- Income ceiling: $14,000 (couples/families)
+- SC+SC: up to **$50,000** for 3/4-room, $40,000 for 2/5-room
+- SC+PR: up to **$40,000** for 3/4-room
+- Half-grant for first-timer + second-timer couples
+
+**Proximity Housing Grant (PHG)** (resale only)
+- **$30,000** if buying to live with/near parents (same town)
+- **$20,000** if buying within 4 km of parents
+
+**Step-Up CPF Housing Grant** (resale, second-timers upgrading from 2-room)
+- **$15,000** for 2-room flat residents upgrading, income ≤$7,000
+""")
+
+        # Insurance nudge
+        st.divider()
+        st.info("🛡️ Buying with a grant often means higher ownership pride — protect your investment with MRTA. Head to **🛡️ Insurance** to calculate your coverage needs.")
+
+# ── Rent vs Buy Calculator ─────────────────────────────────────────────────────
+elif tab_select == "🏠↔️ Rent vs Buy":
+    st.header("🏠↔️ Rent vs Buy Analysis")
+    st.markdown("*Should you rent or buy now? Compare the true total cost and net position over your chosen horizon, accounting for mortgage interest, CPF accrued costs, property tax, investment opportunity cost, and appreciation.*")
+
+    from agents.rent_vs_buy import analyse_dict
+    import pandas as pd
+
+    rvb1, rvb2 = st.columns(2)
+    with rvb1:
+        st.subheader("🏠 Property (Buy)")
+        rvb_price = st.number_input("Purchase Price (SGD)", 200000, 10000000, 600000, step=10000, key="rvb_price")
+        rvb_ftype = st.selectbox("Property type", ["HDB","Condo","EC","Landed"], key="rvb_ftype")
+        rvb_first = st.checkbox("First property purchase", value=True, key="rvb_first")
+        rvb_sc = st.checkbox("Singapore Citizen (main buyer)", value=True, key="rvb_sc")
+        rvb_pr = st.checkbox("Permanent Resident (if not SC)", value=False, key="rvb_pr")
+        rvb_down = st.slider("Down payment (%)", 10, 50, 25, 5, key="rvb_down") / 100
+        rvb_cpf_frac = st.slider("CPF portion of down payment (%)", 0, 100, 40, 5, key="rvb_cpf") / 100
+        rvb_rate = st.number_input("Loan interest rate (%)", 1.0, 6.0, 3.5, 0.1, key="rvb_rate")
+        rvb_tenure = st.number_input("Loan tenure (years)", 5, 30, 25, key="rvb_tenure")
+        rvb_maint = st.number_input("Monthly maintenance / S&CC (SGD)", 0, 2000, 300, 50, key="rvb_maint")
+    with rvb2:
+        st.subheader("🏢 Rental Alternative")
+        rvb_rent = st.number_input("Comparable monthly rent (SGD, 0 = auto-estimate)", 0, 20000, 0, 100, key="rvb_rent",
+                                    help="Leave 0 to auto-estimate at 3.5% gross yield of purchase price")
+        st.subheader("📈 Assumptions")
+        rvb_years = st.slider("Analysis horizon (years)", 1, 20, 5, key="rvb_years")
+        rvb_appr = st.slider("Property appreciation p.a. (%)", 0.0, 8.0, 3.5, 0.5, key="rvb_appr")
+        rvb_invest = st.slider("Investment return if renting (%)", 0.0, 10.0, 5.0, 0.5, key="rvb_invest",
+                                help="Expected annual return if you invest the down payment + monthly savings instead of buying")
+
+    if st.button("Analyse Now 📊", type="primary", key="rvb_run"):
+        _r = analyse_dict(
+            purchase_price=float(rvb_price),
+            flat_type=rvb_ftype,
+            is_first_property=rvb_first,
+            is_sc=rvb_sc,
+            is_pr=rvb_pr and not rvb_sc,
+            down_pmt_pct=float(rvb_down),
+            loan_rate_pct=float(rvb_rate),
+            loan_tenure_years=int(rvb_tenure),
+            cpf_used_pct=float(rvb_cpf_frac),
+            monthly_rent=float(rvb_rent),
+            years_horizon=int(rvb_years),
+            property_appreciation_pct=float(rvb_appr),
+            investment_return_pct=float(rvb_invest),
+            monthly_maintenance=float(rvb_maint),
+        )
+        st.divider()
+
+        # Verdict banner
+        if _r["buy_wins"]:
+            st.success(f"### 🏆 Buy wins  —  ahead by **SGD {abs(_r['delta_sgd']):,.0f}** over {rvb_years} years")
+        else:
+            st.warning(f"### 📈 Renting ahead  —  by **SGD {abs(_r['delta_sgd']):,.0f}** over {rvb_years} years  (buy breaks even year {_r['breakeven_year']} if appreciation holds)")
+
+        st.markdown(_r["verdict"])
+
+        # Side-by-side metrics
+        rvb_c1, rvb_c2 = st.columns(2)
+        bd = _r["buy_details"]
+        rd = _r["rent_details"]
+
+        with rvb_c1:
+            st.subheader("🏠 Buy scenario")
+            st.metric("Upfront cash needed", f"SGD {bd.get('upfront_cash_required',0):,.0f}")
+            st.metric("Monthly cost (loan+maint+tax)", f"SGD {bd.get('monthly_total',0):,.0f}")
+            st.metric("Total interest paid", f"SGD {bd.get('total_interest_paid',0):,.0f}")
+            st.metric("Stamp duty (BSD+ABSD)", f"SGD {bd.get('stamp_duty_bsd',0)+bd.get('stamp_duty_absd',0):,.0f}")
+            st.metric(f"Property value in {rvb_years}yr", f"SGD {bd.get('future_property_value',0):,.0f}")
+            st.metric("Net equity after sale", f"SGD {_r['buy_net_position']:,.0f}")
+
+        with rvb_c2:
+            st.subheader("🏢 Rent scenario")
+            st.metric("Monthly rent", f"SGD {rd.get('monthly_rent',0):,.0f}")
+            st.metric("Total rent paid", f"SGD {rd.get('total_rent_paid',0):,.0f}")
+            st.metric("Capital invested (alt)", f"SGD {rd.get('capital_deployed_to_investments',0):,.0f}")
+            st.metric("Monthly savings invested", f"SGD {rd.get('monthly_savings_vs_buying',0):,.0f}")
+            st.metric(f"Portfolio value in {rvb_years}yr", f"SGD {_r['rent_net_position']:,.0f}")
+
+        # Breakeven chart
+        with st.expander("📈 Year-by-year comparison"):
+            _chart_rows = []
+            for _yr in range(1, min(rvb_years + 5, 21)):
+                _yr_r = analyse_dict(
+                    purchase_price=float(rvb_price), flat_type=rvb_ftype,
+                    is_first_property=rvb_first, is_sc=rvb_sc, is_pr=rvb_pr and not rvb_sc,
+                    down_pmt_pct=float(rvb_down), loan_rate_pct=float(rvb_rate),
+                    loan_tenure_years=int(rvb_tenure), cpf_used_pct=float(rvb_cpf_frac),
+                    monthly_rent=float(rvb_rent), years_horizon=_yr,
+                    property_appreciation_pct=float(rvb_appr),
+                    investment_return_pct=float(rvb_invest),
+                    monthly_maintenance=float(rvb_maint),
+                )
+                _chart_rows.append({
+                    "Year": _yr,
+                    "Buy net position (SGD)": _yr_r["buy_net_position"],
+                    "Rent portfolio value (SGD)": _yr_r["rent_net_position"],
+                })
+            _chart_df = pd.DataFrame(_chart_rows).set_index("Year")
+            st.line_chart(_chart_df, height=300)
+            st.caption("Buy net position = property value − outstanding loan − CPF refund − selling cost. Rent portfolio = invested down payment + monthly savings, compounded.")
+
+        with st.expander("ℹ️ Assumptions"):
+            for _a in _r["assumptions"]:
+                st.markdown(f"- {_a}")
+
+        # Insurance nudge
+        st.divider()
+        if _r["buy_wins"] or _r["breakeven_year"] <= 7:
+            st.info("🛡️ If buying makes sense, protect your mortgage with MRTA. Head to **🛡️ Insurance** to get a quote.")
 
 # ── Partners ──────────────────────────────────────────────────────────────────
 elif tab_select == "🤝 Partners":
