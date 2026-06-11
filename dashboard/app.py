@@ -163,7 +163,10 @@ html, body, [class*="css"], button, input, select, textarea {
 [data-testid="stSidebar"] small {
     color: #c8d8e8 !important;
 }
-[data-testid="stSidebar"] .stRadio label { font-size: 0.88rem; }
+/* Category radio: larger, gold tint */
+[data-testid="stSidebar"] .stRadio:first-of-type label { font-size: 0.95rem !important; font-weight: 600 !important; }
+/* Page radio: slightly indented */
+[data-testid="stSidebar"] .stRadio + .stRadio label { font-size: 0.84rem !important; padding-left: 0.5rem !important; }
 [data-testid="stSidebar"] [data-baseweb="radio"] [aria-checked="true"] ~ span {
     color: #c9a84c !important;
     font-weight: 600;
@@ -313,12 +316,59 @@ with st.sidebar:
     st.info(f"{mode_colors.get(mode_info['mode'], '⚪')} LLM: **{mode_info['mode'].upper()}** — {mode_info['model']}")
 
     st.divider()
-    tab_select = st.radio(
-        "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel",
-         "🛡️ Insurance", "🏦 Mortgage", "💹 Tools", "🔔 Watchlist", "🏗️ BTO",
-         "📅 MOP Tracker", "🏚️ En-Bloc", "⚖️ Compare", "🤝 Partners", "⚙️ Admin"],
+
+    # ── Two-level navigation: category → page ─────────────────────────────────
+    NAV = {
+        "🔍 Research": [
+            "🏠 Address Lookup",
+            "📊 Deal Feed",
+            "🔍 Valuation",
+            "⚖️ Compare",
+            "🏚️ En-Bloc",
+        ],
+        "📰 Intelligence": [
+            "📰 News & Sentiment",
+            "🏗️ BTO Pipeline",
+            "📅 MOP Tracker",
+        ],
+        "💰 Finance": [
+            "🏦 Mortgage",
+            "💹 Stamp Duty & ROI",
+        ],
+        "🛡️ Protect": [
+            "🛡️ Insurance",
+            "🔔 Watchlist & Alerts",
+        ],
+        "🤝 Partners": ["🤝 Partners"],
+        "⚙️ Admin":    ["⚙️ Admin"],
+    }
+
+    # Flat map for legacy tab_select compatibility
+    _NAV_ALIASES = {
+        "📰 News & Sentiment": "📰 News Intel",
+        "💹 Stamp Duty & ROI": "💹 Tools",
+        "🔔 Watchlist & Alerts": "🔔 Watchlist",
+        "🏗️ BTO Pipeline": "🏗️ BTO",
+    }
+
+    nav_cat = st.radio(
+        "Section",
+        list(NAV.keys()),
+        label_visibility="collapsed",
     )
+
+    pages = NAV[nav_cat]
+    if len(pages) == 1:
+        nav_page = pages[0]
+    else:
+        nav_page = st.radio(
+            "Page",
+            pages,
+            label_visibility="collapsed",
+        )
+
+    # Resolve alias so existing elif chain keeps working unchanged
+    tab_select = _NAV_ALIASES.get(nav_page, nav_page)
 
     st.divider()
     with st.expander("📖 Terms Explained"):
