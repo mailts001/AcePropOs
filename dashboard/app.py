@@ -194,7 +194,7 @@ with st.sidebar:
     st.divider()
     tab_select = st.radio(
         "Navigate",
-        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "🔔 Watchlist", "⚙️ Admin"],
+        ["🏠 Address Lookup", "📊 Deal Feed", "🔍 Valuation", "📰 News Intel", "🛡️ Insurance", "🏦 Mortgage", "🔔 Watchlist", "🏗️ BTO", "⚙️ Admin"],
     )
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
@@ -1580,6 +1580,116 @@ elif tab_select == "🔔 Watchlist":
 
                         with st.expander("Telegram message preview"):
                             st.code(format_alert_message(alert), language=None)
+
+# ── BTO ───────────────────────────────────────────────────────────────────────
+elif tab_select == "🏗️ BTO":
+    from data.bto_pipeline import get_bto_summary, estimate_bto_price
+    import pandas as _pd
+
+    st.header("🏗️ BTO Launch Tracker")
+    st.caption("HDB Build-to-Order launch calendar, price guide, and savings vs resale.")
+
+    bto_tab1, bto_tab2, bto_tab3 = st.tabs(["📅 Upcoming Launches", "💰 Price Estimator", "📊 Launch History"])
+
+    # ── Upcoming ────────────────────────────────────────────────────────────────
+    with bto_tab1:
+        summary = get_bto_summary()
+        st.subheader("Upcoming BTO Launches")
+        for launch in summary["upcoming"]:
+            with st.expander(f"📅 {launch['launch_date']} — {', '.join(launch['estates'][:2])} {'+ more' if len(launch['estates']) > 2 else ''}"):
+                st.markdown(f"**Estates:** {', '.join(launch['estates'])}")
+                st.markdown(f"**Note:** {launch['note']}")
+                st.caption(f"Source: {launch['source']}")
+
+        st.divider()
+        st.subheader("BTO vs Resale Price Guide")
+        st.info("BTO flats are typically **30–50% cheaper** than resale market prices in the same area. The trade-off: 5-year Minimum Occupancy Period (MOP) before selling.")
+
+        cols = st.columns(2)
+        for i, (estate_type, prices) in enumerate(summary["price_guide"].items()):
+            with cols[i % 2]:
+                st.markdown(f"**{estate_type.title()} Estates**")
+                rows = []
+                for flat, (lo, hi) in prices.items():
+                    rows.append({"Flat Type": flat, "From (SGD)": f"{lo:,}", "To (SGD)": f"{hi:,}"})
+                st.dataframe(_pd.DataFrame(rows).set_index("Flat Type"), use_container_width=True)
+
+    # ── Price Estimator ─────────────────────────────────────────────────────────
+    with bto_tab2:
+        st.subheader("BTO Price Estimator")
+
+        cache_path = Path(__file__).parent.parent / "cache" / "hdb" / "resale.json"
+        town_opts = ["TAMPINES", "WOODLANDS", "YISHUN", "QUEENSTOWN", "KALLANG/WHAMPOA",
+                     "ANG MO KIO", "BUKIT MERAH", "JURONG WEST", "TENGAH", "SENGKANG"]
+        if cache_path.exists():
+            try:
+                _recs = json.load(open(cache_path))
+                town_opts = sorted(set(r.get("town","") for r in _recs if r.get("town")))
+            except Exception:
+                pass
+
+        pe1, pe2 = st.columns(2)
+        bto_town = pe1.selectbox("Select Estate", town_opts, key="bto_town")
+        bto_flat = pe2.selectbox("Flat Type", ["4 ROOM", "3 ROOM", "5 ROOM", "2 ROOM FLEXI", "EXECUTIVE"], key="bto_flat")
+
+        if st.button("Estimate BTO Price", type="primary", key="bto_est"):
+            est = estimate_bto_price(bto_town, bto_flat)
+            resale_data = None
+
+            # Get current resale price for comparison
+            try:
+                from data.hdb_pipeline import get_town_stats
+                stats = get_town_stats(bto_town, bto_flat)
+                resale_median = stats.get("median_price")
+            except Exception:
+                resale_median = None
+
+            st.divider()
+            b1, b2, b3 = st.columns(3)
+            b1.metric("BTO Price From", f"SGD {est['price_from_sgd']:,}")
+            b2.metric("BTO Price To", f"SGD {est['price_to_sgd']:,}")
+            if resale_median:
+                bto_mid = (est['price_from_sgd'] + est['price_to_sgd']) / 2
+                savings_pct = (resale_median - bto_mid) / resale_median * 100
+                b3.metric("vs Resale Savings", f"~{savings_pct:.0f}%",
+                          help=f"Resale median: SGD {resale_median:,.0f}")
+
+            st.info(f"**{est['estate_type'].title()} Estate** — {est['note']}")
+
+            if resale_median:
+                st.markdown(
+                    f"Current resale median for {bto_town} {bto_flat}: **SGD {resale_median:,.0f}**\n\n"
+                    f"BTO midpoint estimate: **SGD {(est['price_from_sgd']+est['price_to_sgd'])//2:,}**\n\n"
+                    f"Estimated instant equity on MOP: **SGD {resale_median - (est['price_from_sgd']+est['price_to_sgd'])//2:,}**"
+                )
+
+            # MRTA nudge for new flat buyers
+            st.divider()
+            st.markdown("### 🛡️ New BTO buyers: don't forget MRTA")
+            st.markdown(
+                "If you're taking an HDB or bank loan for your BTO, an MRTA policy ensures your family "
+                "won't lose the flat if you pass away before the loan is paid off. "
+                "One-time premium typically SGD 2,000–5,000."
+            )
+
+    # ── Launch History ──────────────────────────────────────────────────────────
+    with bto_tab3:
+        st.subheader("Recent BTO Launch History")
+        summary = get_bto_summary()
+        if summary["recent_launches"]:
+            df_bto = _pd.DataFrame(summary["recent_launches"])
+            df_bto = df_bto[df_bto["town"].str.len() > 0] if "town" in df_bto.columns else df_bto
+            st.dataframe(df_bto, use_container_width=True)
+        else:
+            st.info("No launch history cached yet. Data loads from data.gov.sg automatically.")
+            if st.button("🔄 Fetch BTO History", key="bto_refresh"):
+                from data.bto_pipeline import fetch_bto_launches
+                try:
+                    records = fetch_bto_launches(force=True)
+                    st.success(f"Loaded {len(records)} BTO records.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed: {e}")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
