@@ -1,0 +1,54 @@
+{
+  "partners": {
+    "ntuc_income": {
+      "name": "NTUC Income",
+      "website": "https://www.income.com.sg",
+      "products": ["home_contents", "fire_insurance", "landlord_insurance"],
+      "referral_contact": "partnerships@income.com.sg",
+      "est_commission_sgd": {"home_contents": 150, "fire_insurance": 120, "landlord_insurance": 300}
+    },
+    "fwd_singapore": {
+      "name": "FWD Singapore",
+      "website": "https://www.fwd.com.sg",
+      "products": ["home_insurance", "mortgage_insurance"],
+      "referral_contact": "https://www.fwd.com.sg/partner-with-us",
+      "est_commission_sgd": {"home_insurance": 200, "mortgage_insurance": 1500}
+    },
+    "great_eastern": {
+      "name": "Great Eastern",
+      "website": "https://www.greateasternlife.com/sg",
+      "products": ["mrta", "mlta", "home_protection"],
+      "referral_contact": "agency@greateasternlife.com",
+      "est_commission_sgd": {"mrta": 2500, "mlta": 3000, "home_protection": 400}
+    },
+    "manulife_sg": {
+      "name": "Manulife Singapore",
+      "website": "https://www.manulife.com.sg",
+      "products": ["mrta", "mlta"],
+      "referral_contact": "https://www.manulife.com.sg/en/agents.html",
+      "est_commission_sgd": {"mrta": 2000, "mlta": 2800}
+    },
+    "aig_singapore": {
+      "name": "AIG Singapore",
+      "website": "https://www.aig.com.sg",
+      "products": ["property_insurance", "landlord_insurance", "commercial_property"],
+      "referral_contact": "info.sg@aig.com",
+      "est_commission_sgd": {"property_insurance": 250, "landlord_insurance": 350, "commercial_property": 800}
+    },
+    "tokio_marine": {
+      "name": "Tokio Marine Insurance",
+      "website": "https://www.tokiomarine.com/sg",
+      "products": ["home_insurance", "landlord_insurance", "fire_insurance"],
+      "referral_contact": "https://www.tokiomarine.com/sg/en/contact-us.html",
+      "est_commission_sgd": {"home_insurance": 180, "landlord_insurance": 320, "fire_insurance": 130}
+    }
+  },
+  "trigger_rules": {
+    "new_property_added": ["fire_insurance", "home_contents", "landlord_insurance"],
+    "mortgage_initiated": ["mrta", "mlta", "home_protection"],
+    "property_rented_out": ["landlord_insurance"],
+    "annual_renewal_check": ["all"],
+    "refi_triggered": ["mrta", "mlta"]
+  },
+  "disclaimer": "PropertyOS is a referral platform only. We do not provide insurance advice. All insurance decisions should be made in consultation with a licensed financial adviser."
+}

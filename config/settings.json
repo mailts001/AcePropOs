@@ -1,0 +1,100 @@
+{
+  "app": {
+    "name": "PropertyOS",
+    "version": "0.1.0",
+    "environment": "development"
+  },
+  "llm": {
+    "mode": "free",
+    "modes": {
+      "free": {
+        "provider": "google",
+        "model": "gemini-2.0-flash",
+        "description": "Free tier \u2014 Gemini 2.0 Flash, 15 RPM limit",
+        "cost_per_1k_tokens_input": 0.0,
+        "cost_per_1k_tokens_output": 0.0,
+        "rate_limit_rpm": 15,
+        "use_for": [
+          "batch_analysis",
+          "cron_jobs",
+          "bulk_valuation"
+        ]
+      },
+      "balanced": {
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
+        "description": "Near-free \u2014 Groq Llama 3.1 8B, very fast",
+        "cost_per_1k_tokens_input": 5e-05,
+        "cost_per_1k_tokens_output": 8e-05,
+        "rate_limit_rpm": 30,
+        "use_for": [
+          "structured_outputs",
+          "deal_scoring",
+          "quick_queries"
+        ]
+      },
+      "quality": {
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "description": "Default production \u2014 Claude Haiku 4.5",
+        "cost_per_1k_tokens_input": 0.0008,
+        "cost_per_1k_tokens_output": 0.004,
+        "rate_limit_rpm": 60,
+        "use_for": [
+          "user_queries",
+          "deal_summaries",
+          "portfolio_analysis"
+        ]
+      },
+      "premium": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "description": "Full quality \u2014 Claude Sonnet 4.6, VC demos",
+        "cost_per_1k_tokens_input": 0.003,
+        "cost_per_1k_tokens_output": 0.015,
+        "rate_limit_rpm": 50,
+        "use_for": [
+          "complex_reasoning",
+          "investor_reports",
+          "vc_demo"
+        ]
+      }
+    },
+    "fallback_chain": [
+      "quality",
+      "balanced",
+      "free"
+    ],
+    "cache_responses": true,
+    "cache_ttl_hours": 6
+  },
+  "data": {
+    "ura_sync_interval_hours": 24,
+    "hdb_sync_interval_hours": 168,
+    "news_sync_interval_minutes": 60,
+    "cache_dir": "cache/",
+    "max_transactions_per_query": 500
+  },
+  "features": {
+    "deal_hunter": true,
+    "mortgage_comparison": true,
+    "insurance_referrals": true,
+    "news_sentiment": true,
+    "portfolio_tracking": true,
+    "telegram_alerts": true,
+    "agent_cma": true
+  },
+  "monetisation": {
+    "mortgage_referral_fee_sgd": 1500,
+    "insurance_home_referral_fee_sgd": 200,
+    "insurance_mrta_referral_fee_sgd": 2000,
+    "legal_referral_fee_sgd": 400,
+    "renovation_referral_pct": 0.06
+  },
+  "alerts": {
+    "deal_threshold_pct_below_district": 8,
+    "refi_saving_threshold_sgd": 3000,
+    "news_sentiment_alert_threshold": 0.7,
+    "max_alerts_per_user_per_day": 5
+  }
+}
