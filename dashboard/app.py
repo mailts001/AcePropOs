@@ -354,14 +354,21 @@ with st.sidebar:
         "🏗️ BTO Pipeline": "🏗️ BTO",
     }
 
-    st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
-    nav_cat = st.radio(
-        "Section",
-        list(NAV.keys()),
-        label_visibility="collapsed",
-    )
+    # ── Email capture — top of sidebar, before nav ───────────────────────────
+    with st.expander("📬 Get market updates", expanded=False):
+        _cap_email = st.text_input("Your email", placeholder="you@email.com", key="cap_email", label_visibility="collapsed")
+        if st.button("Subscribe", key="cap_sub", use_container_width=True):
+            if "@" in _cap_email:
+                try:
+                    from data.analytics import track_pageview as _tp_cap
+                    _tp_cap("email_capture", session_id=st.session_state.get("session_id",""), email=_cap_email)
+                except Exception:
+                    pass
+                st.success("✅ Subscribed!")
+            else:
+                st.warning("Enter a valid email.")
 
-    pages = NAV[nav_cat]
+    st.divider()
 
     # ── Page popularity counts (from analytics) ──────────────────────────────
     _page_counts: dict = {}
@@ -373,25 +380,36 @@ with st.sidebar:
         pass
 
     def _label(pg: str) -> str:
-        """Append heat indicator to page label based on 7-day views."""
+        """Append heat indicator — uses format_func so clean name is the stored value."""
         alias_key = _NAV_ALIASES.get(pg, pg)
         cnt = _page_counts.get(alias_key, _page_counts.get(pg, 0))
-        if cnt >= 50:  return f"{pg} 🔥"
-        if cnt >= 20:  return f"{pg} ·{cnt}"
-        if cnt >= 5:   return f"{pg} ·{cnt}"
+        if cnt >= 50: return f"{pg} 🔥"
+        if cnt >= 5:  return f"{pg}  ·{cnt} views"
         return pg
+
+    st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
+    nav_cat = st.radio(
+        "Section",
+        list(NAV.keys()),
+        label_visibility="collapsed",
+        key="nav_cat",
+    )
+
+    pages = NAV[nav_cat]
 
     if len(pages) == 1:
         nav_page = pages[0]
     else:
         st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin:6px 0 2px 0'>Sub Menus</p>", unsafe_allow_html=True)
-        nav_page_label = st.radio(
+        # KEY FIX: store clean page name as value, display labeled version via format_func
+        # This prevents label-change desync on rerun when counts update
+        nav_page = st.radio(
             "Page",
-            [_label(p) for p in pages],
+            pages,
+            format_func=_label,
             label_visibility="collapsed",
+            key=f"nav_page_{nav_cat}",   # unique key per category so selection resets on category switch
         )
-        # Strip the label suffix to get the clean page name
-        nav_page = pages[[_label(p) for p in pages].index(nav_page_label)]
 
     # Resolve alias so existing elif chain keeps working unchanged
     tab_select = _NAV_ALIASES.get(nav_page, nav_page)
@@ -425,6 +443,7 @@ with st.sidebar:
 - **Fire Insurance** — Covers the structure of your property (required for HDB).
 - **Home Contents** — Covers furniture, appliances, and belongings inside your home.
         """)
+
     # ── Live visitor stats ────────────────────────────────────────────────────
     try:
         from data.analytics import get_summary as _vs
@@ -433,26 +452,12 @@ with st.sidebar:
         _d = _today_stats["unique_visitors_ip"]
         _t = _total_stats["unique_visitors_ip"]
         st.markdown(
-            f"<p style='font-size:0.72rem;opacity:0.55;margin:4px 0 0 0'>"
-            f"👁 Today: <b>{_d}</b> visitors · Total: <b>{_t}</b></p>",
+            f"<p style='font-size:0.72rem;opacity:0.6;margin:6px 0 0 0'>"
+            f"👁 Today: <b>{_d}</b> &nbsp;·&nbsp; Total: <b>{_t}</b></p>",
             unsafe_allow_html=True
         )
-    except Exception:
-        pass
-
-    # ── Email capture (subtle, sidebar) ──────────────────────────────────────
-    with st.expander("📬 Get market updates", expanded=False):
-        _cap_email = st.text_input("Your email", placeholder="you@email.com", key="cap_email", label_visibility="collapsed")
-        if st.button("Subscribe", key="cap_sub", use_container_width=True):
-            if "@" in _cap_email:
-                try:
-                    from data.analytics import track_pageview
-                    track_pageview("email_capture", session_id=st.session_state.get("session_id",""), email=_cap_email)
-                except Exception:
-                    pass
-                st.success("✅ Subscribed!")
-            else:
-                st.warning("Enter a valid email.")
+    except Exception as _ve:
+        st.caption(f"Stats error: {_ve}")   # show error in dev, remove in prod
 
     st.caption("v1.0 · acepropos.duckdns.org")
 
@@ -471,13 +476,17 @@ try:
         or _headers.get("X-Real-Ip", "")
         or ""
     )
-    track_pageview(
-        page=tab_select,
-        session_id=_session_id,
-        ip=_visitor_ip,
-    )
+    # Only track when page actually changes — prevents counting every Streamlit rerun
+    _last_tracked = st.session_state.get("_last_tracked_page", "")
+    if tab_select != _last_tracked:
+        track_pageview(
+            page=tab_select,
+            session_id=_session_id,
+            ip=_visitor_ip,
+        )
+        st.session_state["_last_tracked_page"] = tab_select
 except Exception:
-    pass
+    _visitor_ip = ""
 
 # ── Address Lookup ────────────────────────────────────────────────────────────
 if tab_select == "🏠 Address Lookup":
