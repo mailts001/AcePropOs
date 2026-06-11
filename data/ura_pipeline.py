@@ -143,6 +143,14 @@ def _extract_district(district_id: str) -> int:
         return 0
 
 
+def _to_int(v) -> int:
+    """Safely coerce a district value (str/int/float) to int."""
+    try:
+        return int(str(v).replace("D", "").strip())
+    except (ValueError, TypeError):
+        return 0
+
+
 def get_district_stats(district: int, property_type: str = "") -> dict:
     """
     Return median PSF, median price, transaction count for a district.
@@ -154,20 +162,24 @@ def get_district_stats(district: int, property_type: str = "") -> dict:
         cache_path = CACHE_DIR / f"transactions_batch{batch}.json"
         if cache_path.exists():
             data = json.loads(cache_path.read_text())
-            all_txns.extend(data["transactions"])
+            # Support both {"transactions": [...]} wrapper and bare list
+            txns = data["transactions"] if isinstance(data, dict) else data
+            all_txns.extend(txns)
 
+    # Normalise district to int for comparison (URA may store as str/int)
+    target = int(district)
     filtered = [
         t for t in all_txns
-        if t["district"] == district
-        and (not property_type or property_type.lower() in t["property_type"].lower())
-        and t["psf_sgd"] > 0
+        if _to_int(t.get("district", 0)) == target
+        and (not property_type or property_type.lower() in str(t.get("property_type", "")).lower())
+        and float(t.get("psf_sgd", 0) or 0) > 0
     ]
 
     if not filtered:
         return {"district": district, "count": 0}
 
-    psfs = sorted(t["psf_sgd"] for t in filtered)
-    prices = sorted(t["price_sgd"] for t in filtered)
+    psfs = sorted(float(t.get("psf_sgd") or 0) for t in filtered if t.get("psf_sgd"))
+    prices = sorted(float(t.get("price_sgd") or 0) for t in filtered if t.get("price_sgd"))
     n = len(psfs)
 
     return {
