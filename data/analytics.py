@@ -79,6 +79,16 @@ def ensure_schema():
                 action TEXT,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS subscribers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE,
+                subscribed_at TEXT DEFAULT (datetime('now')),
+                welcome_sent INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'sidebar',
+                active INTEGER DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_sub_email ON subscribers(email);
         """)
 
 
@@ -276,3 +286,65 @@ def ai_visitor_summary(stats: dict, engaged: list[dict]) -> str:
             lines.append(f"  • {contact} — visited: {s['pages_visited']} ({s['page_count']} pages)")
 
     return "\n".join(lines)
+
+
+# ── Subscriber management ─────────────────────────────────────────────────────
+
+def add_subscriber(email: str, source: str = "sidebar") -> dict:
+    """
+    Add email to subscribers table.
+    Returns {"new": bool, "total": int}
+    """
+    ensure_schema()
+    email = email.strip().lower()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        existing = conn.execute("SELECT id FROM subscribers WHERE email=?", (email,)).fetchone()
+        if existing:
+            return {"new": False, "total": get_subscriber_count()}
+        conn.execute(
+            "INSERT OR IGNORE INTO subscribers (email, source) VALUES (?,?)",
+            (email, source)
+        )
+        conn.commit()
+    return {"new": True, "total": get_subscriber_count()}
+
+
+def get_subscriber_count(active_only: bool = True) -> int:
+    """Return total subscriber count."""
+    ensure_schema()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        if active_only:
+            row = conn.execute("SELECT COUNT(*) FROM subscribers WHERE active=1").fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()
+    return row[0] if row else 0
+
+
+def get_unnotified_subscribers(limit: int = 100) -> list[dict]:
+    """Return subscribers who haven't received the welcome email yet."""
+    ensure_schema()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM subscribers WHERE welcome_sent=0 AND active=1 LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_welcome_sent(email: str):
+    """Mark welcome email as sent for this subscriber."""
+    ensure_schema()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.execute("UPDATE subscribers SET welcome_sent=1 WHERE email=?", (email,))
+        conn.commit()
+
+
+def get_all_subscribers(active_only: bool = True) -> list[dict]:
+    """Return full subscriber list for admin."""
+    ensure_schema()
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        q = "SELECT * FROM subscribers WHERE active=1 ORDER BY subscribed_at DESC" if active_only \
+            else "SELECT * FROM subscribers ORDER BY subscribed_at DESC"
+        rows = conn.execute(q).fetchall()
+    return [dict(r) for r in rows]

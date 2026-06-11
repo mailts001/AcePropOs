@@ -19,6 +19,73 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
+
+def _send_welcome_email(to_email: str) -> bool:
+    """
+    Send a welcome email to a new subscriber using SMTP.
+    Reads SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS from environment.
+    Falls back gracefully if SMTP not configured.
+    Returns True if sent, False if skipped/failed.
+    """
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+
+    if not smtp_host or not smtp_user:
+        return False  # SMTP not configured — silent skip
+
+    subject = "Welcome to PropOS — Singapore's AI Property Intelligence"
+    html_body = f"""
+<html><body style="font-family:Inter,sans-serif;background:#f5f5f5;padding:20px">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;padding:32px">
+  <h2 style="color:#1a1a2e;margin-bottom:4px">Welcome to PropOS 🏡</h2>
+  <p style="color:#666;margin-top:0">Singapore AI Property Intelligence</p>
+  <hr style="border:1px solid #eee">
+  <p>Hi there,</p>
+  <p>Thanks for subscribing! Here's what PropOS gives you <b>for free</b>:</p>
+  <ul>
+    <li>🔍 <b>Live HDB & private condo valuations</b> from 137,000+ URA transactions</li>
+    <li>🗺️ <b>Full property research map</b> — MRT, hawkers, malls, schools + transaction heatmap</li>
+    <li>💰 <b>CPF Housing Grants calculator</b> — find out if you qualify for up to $80,000</li>
+    <li>🏠↔️ <b>Rent vs Buy analyser</b> — know your breakeven year instantly</li>
+    <li>📊 <b>Deal Feed</b> — properties trading >10% below district median</li>
+    <li>🏗️ <b>En-Bloc scanner</b> — early signals on collective sales</li>
+    <li>📅 <b>MOP countdown tracker</b> — know when HDB flats become eligible to sell</li>
+  </ul>
+  <p>
+    <a href="http://acepropos.duckdns.org"
+       style="background:#c8a84b;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700">
+      Open PropOS Dashboard →
+    </a>
+  </p>
+  <hr style="border:1px solid #eee">
+  <p style="font-size:12px;color:#999">
+    You're receiving this because you subscribed at acepropos.duckdns.org.<br>
+    PropOS is free for personal use. No spam — we only email when there's something worth knowing.
+  </p>
+</div>
+</body></html>
+"""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = smtp_user
+        msg["To"] = to_email
+        msg.attach(MIMEText(html_body, "html"))
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, to_email, msg.as_string())
+        return True
+    except Exception:
+        return False
+
+
 def _gradient_html(df, col_cmaps: dict, fmt: dict | None = None) -> str:
     """
     Render a DataFrame as colour-coded HTML without requiring matplotlib.
@@ -360,34 +427,60 @@ with st.sidebar:
     with st.expander("📬 Get market updates", expanded=False):
         _cap_email = st.text_input("Your email", placeholder="you@email.com", key="cap_email", label_visibility="collapsed")
         if st.button("Subscribe", key="cap_sub", use_container_width=True):
-            if "@" in _cap_email:
+            if "@" in _cap_email and "." in _cap_email:
                 try:
-                    from data.analytics import track_pageview as _tp_cap
+                    from data.analytics import add_subscriber, track_pageview as _tp_cap
+                    _sub_result = add_subscriber(_cap_email.strip().lower(), source="sidebar")
                     _tp_cap("email_capture", session_id=st.session_state.get("session_id",""), email=_cap_email)
-                except Exception:
-                    pass
-                st.success("✅ Subscribed!")
+                    if _sub_result.get("new"):
+                        st.success("✅ Subscribed! Sending you a welcome email now…")
+                        # Try to send welcome email immediately
+                        _sent = _send_welcome_email(_cap_email.strip().lower())
+                        if _sent:
+                            from data.analytics import mark_welcome_sent as _mws
+                            _mws(_cap_email.strip().lower())
+                        st.session_state["_send_welcome_to"] = _cap_email.strip().lower()
+                    else:
+                        st.info("Already subscribed! We'll keep you posted.")
+                except Exception as _se:
+                    st.success("✅ Subscribed!")  # fail gracefully
             else:
-                st.warning("Enter a valid email.")
+                st.warning("Enter a valid email address.")
 
     st.divider()
 
     # ── Page popularity counts (from analytics) ──────────────────────────────
-    _page_counts: dict = {}
+    # Load counts into session state so labels are consistent within a rerun
+    _page_counts: dict = st.session_state.get("_page_counts_cache", {})
     try:
         from data.analytics import get_summary as _get_summary
         _qs = _get_summary(7)
         _page_counts = {p["page"]: p["views"] for p in _qs.get("by_page", [])}
+        st.session_state["_page_counts_cache"] = _page_counts
     except Exception:
         pass
 
     def _label(pg: str) -> str:
-        """Append heat indicator — uses format_func so clean name is the stored value."""
+        """Short heat indicator — format_func so clean name is the stored value."""
         alias_key = _NAV_ALIASES.get(pg, pg)
         cnt = _page_counts.get(alias_key, _page_counts.get(pg, 0))
         if cnt >= 50: return f"{pg} 🔥"
-        if cnt >= 5:  return f"{pg}  ·{cnt} views"
+        if cnt >= 5:  return f"{pg}  ({cnt}👁)"    # short form — won't get clipped
         return pg
+
+    # ── Tracking callback — fires exactly once per navigation change ──────────
+    def _on_page_change():
+        """on_change callback for nav radios — guarantees correct page is tracked."""
+        _cur_cat = st.session_state.get("nav_cat", list(NAV.keys())[0])
+        _cur_pg  = st.session_state.get(f"nav_page_{_cur_cat}", NAV[_cur_cat][0])
+        _alias   = _NAV_ALIASES.get(_cur_pg, _cur_pg)
+        try:
+            from data.analytics import track_pageview as _tpv
+            _tpv(page=_alias,
+                 session_id=st.session_state.get("session_id", ""),
+                 ip=st.session_state.get("_visitor_ip", ""))
+        except Exception:
+            pass
 
     st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin-bottom:2px'>Main Categories</p>", unsafe_allow_html=True)
     nav_cat = st.radio(
@@ -395,22 +488,36 @@ with st.sidebar:
         list(NAV.keys()),
         label_visibility="collapsed",
         key="nav_cat",
+        on_change=_on_page_change,
     )
 
     pages = NAV[nav_cat]
 
     if len(pages) == 1:
         nav_page = pages[0]
+        # Ensure single-page categories still track on first visit
+        _sp_key = f"_tracked_single_{nav_page}"
+        if not st.session_state.get(_sp_key):
+            st.session_state[_sp_key] = True
+            try:
+                from data.analytics import track_pageview as _tpv_sp
+                _tpv_sp(page=_NAV_ALIASES.get(nav_page, nav_page),
+                        session_id=st.session_state.get("session_id", ""),
+                        ip=st.session_state.get("_visitor_ip", ""))
+            except Exception:
+                pass
     else:
         st.markdown("<p style='font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;opacity:0.5;margin:6px 0 2px 0'>Sub Menus</p>", unsafe_allow_html=True)
-        # KEY FIX: store clean page name as value, display labeled version via format_func
-        # This prevents label-change desync on rerun when counts update
+        # KEY: store clean page name as value, format_func only affects display label
+        # unique key per category so selection resets cleanly on category switch
+        # on_change callback fires EXACTLY when user changes selection → no tracking swap
         nav_page = st.radio(
             "Page",
             pages,
             format_func=_label,
             label_visibility="collapsed",
-            key=f"nav_page_{nav_cat}",   # unique key per category so selection resets on category switch
+            key=f"nav_page_{nav_cat}",
+            on_change=_on_page_change,
         )
 
     # Resolve alias so existing elif chain keeps working unchanged
@@ -448,45 +555,56 @@ with st.sidebar:
 
     # ── Live visitor stats ────────────────────────────────────────────────────
     try:
-        from data.analytics import get_summary as _vs
+        from data.analytics import get_summary as _vs, get_subscriber_count as _sub_cnt
         _today_stats = _vs(1)
         _total_stats = _vs(365)
-        _d = _today_stats["unique_visitors_ip"]
-        _t = _total_stats["unique_visitors_ip"]
+        _d  = _today_stats["unique_visitors_ip"]
+        _t  = _total_stats["unique_visitors_ip"]
+        _sc = _sub_cnt()
         st.markdown(
-            f"<p style='font-size:0.72rem;opacity:0.6;margin:6px 0 0 0'>"
-            f"👁 Today: <b>{_d}</b> &nbsp;·&nbsp; Total: <b>{_t}</b></p>",
+            f"<div style='background:rgba(255,255,255,0.06);border-radius:8px;"
+            f"padding:8px 10px;margin:8px 0 4px 0'>"
+            f"<span style='font-size:0.85rem;font-weight:700;color:#c8a84b'>👁 Today: {_d}</span>"
+            f"&nbsp;&nbsp;"
+            f"<span style='font-size:0.85rem;font-weight:700;opacity:0.85'>Total: {_t}</span>"
+            f"<br>"
+            f"<span style='font-size:0.8rem;color:#5cb8a8'>📬 Subscribers: {_sc}</span>"
+            f"</div>",
             unsafe_allow_html=True
         )
     except Exception as _ve:
-        st.caption(f"Stats error: {_ve}")   # show error in dev, remove in prod
+        st.caption(f"Stats: {_ve}")
 
     st.caption("v1.0 · acepropos.duckdns.org")
 
-# ── Session tracking (analytics) ─────────────────────────────────────────────
+# ── Session init & IP resolution ─────────────────────────────────────────────
+# Tracking now fires via on_change callbacks on nav radios (see sidebar above).
+# This guarantees exactly one pageview recorded per navigation, with no swap bug.
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())[:12]
 _session_id = st.session_state["session_id"]
 
 try:
-    from data.analytics import track_pageview, ensure_schema
+    from data.analytics import ensure_schema
     ensure_schema()
-    # Get real IP from Streamlit headers when behind nginx proxy
-    _headers = st.context.headers if hasattr(st, "context") else {}
-    _visitor_ip = (
-        _headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or _headers.get("X-Real-Ip", "")
-        or ""
-    )
-    # Only track when page actually changes — prevents counting every Streamlit rerun
-    _last_tracked = st.session_state.get("_last_tracked_page", "")
-    if tab_select != _last_tracked:
-        track_pageview(
-            page=tab_select,
-            session_id=_session_id,
-            ip=_visitor_ip,
+    # Resolve real visitor IP from nginx proxy headers, store in session state
+    # so the on_change callback can read it
+    if "_visitor_ip" not in st.session_state:
+        _headers = st.context.headers if hasattr(st, "context") else {}
+        _visitor_ip = (
+            _headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or _headers.get("X-Real-Ip", "")
+            or ""
         )
-        st.session_state["_last_tracked_page"] = tab_select
+        st.session_state["_visitor_ip"] = _visitor_ip
+    else:
+        _visitor_ip = st.session_state["_visitor_ip"]
+    # Track initial page load (first time session sees this page)
+    _first_view_key = f"_fv_{_session_id}_{tab_select}"
+    if not st.session_state.get(_first_view_key):
+        st.session_state[_first_view_key] = True
+        from data.analytics import track_pageview as _tpv_init
+        _tpv_init(page=tab_select, session_id=_session_id, ip=_visitor_ip)
 except Exception:
     _visitor_ip = ""
 
@@ -2966,78 +3084,81 @@ elif tab_select == "🗺️ MRT Map":
         loc_label = f"District {dist_sel}"
 
     else:
-        # Project/Address search using URA cache
-        st.caption("Type a project name (e.g. 'The Interlace', 'Tampines St 45') or 6-digit postal code.")
-        addr_query = st.text_input("Project / block / postal code", placeholder="e.g. Tampines Court or 520123", key="mrt_addr_q")
+        # Project/Address search — OneMap API for postal codes, URA cache for project names
+        st.caption("Type a condo/HDB project name (e.g. 'The Interlace', 'Parc Clematis') or exact 6-digit postal code.")
+        addr_query = st.text_input("Project name or postal code", placeholder="e.g. Katong Regency or 439970", key="mrt_addr_q")
 
-        # Attempt to resolve from URA project cache
         _found_coords = None
-        if addr_query and len(addr_query) >= 4:
-            try:
-                from data.ura_pipeline import load_cache
-                _txns = load_cache("transactions")
-                _query_lower = addr_query.strip().lower()
-                # Search by project name (partial match)
-                _matched = [t for t in _txns if _query_lower in t.get("project", "").lower()]
-                if _matched:
-                    # Use x/y coordinates from URA if available, else use district centroid
-                    _match = _matched[0]
-                    _x = float(_match.get("x","0") or 0)
-                    _y = float(_match.get("y","0") or 0)
-                    if _x > 0 and _y > 0:
-                        from data.svy21 import svy21_to_wgs84
-                        _found_coords = svy21_to_wgs84(_x, _y)
-                        loc_label = _match.get("project", addr_query).title()
-                        search_project_name = _match.get("project","")
-                    else:
-                        # Fall back to district centroid
-                        _d = int(_match.get("district", 9) or 9)
-                        _found_coords = DISTRICT_CENTROIDS.get(_d, (1.3521, 103.8198))
-                        loc_label = _match.get("project", addr_query).title()
-                        search_project_name = _match.get("project","")
-            except Exception as _e:
-                st.caption(f"Address search error: {_e}")
 
-            # Postal code fallback: 6 digits → Singapore centroids by first 2 digits
-            if not _found_coords and addr_query.strip().isdigit() and len(addr_query.strip()) == 6:
-                _post_sect = int(addr_query.strip()[:2])
-                _postal_map = {
-                    1: (1.2800,103.8500), 2: (1.2780,103.8420), 3: (1.2890,103.8140),
-                    4: (1.2680,103.8150), 5: (1.3060,103.7800), 6: (1.2940,103.8490),
-                    7: (1.3020,103.8570), 8: (1.3100,103.8560), 9: (1.3060,103.8310),
-                    10: (1.3210,103.8040), 11: (1.3200,103.8380), 12: (1.3310,103.8470),
-                    13: (1.3290,103.8830), 14: (1.3170,103.8910), 15: (1.3050,103.8950),
-                    16: (1.3290,103.9250), 17: (1.3680,103.9700), 18: (1.3550,103.9460),
-                    19: (1.3810,103.8840), 20: (1.3690,103.8480), 21: (1.3340,103.7820),
-                    22: (1.3410,103.7110), 23: (1.3640,103.7590), 24: (1.3980,103.7040),
-                    25: (1.4350,103.7870), 26: (1.4000,103.8250), 27: (1.4290,103.8290),
-                    28: (1.4040,103.8990), 29: (1.3200,103.8900), 30: (1.3300,103.8700),
-                    31: (1.3300,103.8450), 32: (1.3310,103.8480), 33: (1.3320,103.8460),
-                    34: (1.3370,103.8530), 35: (1.3380,103.8540), 36: (1.3360,103.8420),
-                    37: (1.3410,103.8580), 38: (1.3690,103.8880), 39: (1.3720,103.8900),
-                    40: (1.3540,103.9440), 41: (1.3560,103.9450), 42: (1.3480,103.7500),
-                    43: (1.3500,103.7490), 44: (1.3730,103.7440), 45: (1.3850,103.7450),
-                    46: (1.3430,103.7210), 47: (1.3490,103.7070), 48: (1.3380,103.7060),
-                    49: (1.3380,103.6980), 50: (1.3270,103.6780), 51: (1.3730,103.9480),
-                    52: (1.3730,103.9490), 53: (1.3720,103.9480), 54: (1.3730,103.9500),
-                    55: (1.3720,103.9490), 56: (1.3730,103.9500), 57: (1.3710,103.9480),
-                    58: (1.3030,103.7750), 59: (1.3100,103.7640), 60: (1.3050,103.9070),
-                    61: (1.3020,103.9060), 62: (1.3030,103.9070), 63: (1.3015,103.9050),
-                    64: (1.3010,103.9060), 65: (1.2970,103.9100), 66: (1.2960,103.9080),
-                    67: (1.2980,103.9120), 68: (1.2990,103.9050), 69: (1.3010,103.9030),
-                    70: (1.3720,103.8890), 71: (1.3710,103.8880), 72: (1.4290,103.8350),
-                    73: (1.4280,103.8360), 75: (1.3900,103.8960), 76: (1.3910,103.8950),
-                    77: (1.3680,103.8490), 78: (1.3700,103.8500), 79: (1.3680,103.8470),
-                    80: (1.3710,103.8480), 81: (1.3700,103.8460),
-                }
-                _found_coords = _postal_map.get(_post_sect, (1.3521, 103.8198))
-                loc_label = f"Postal {addr_query}"
+        if addr_query and len(addr_query) >= 3:
+            _q = addr_query.strip()
+
+            # ── Path A: 6-digit postal code → OneMap API (exact geocode) ──────
+            if _q.isdigit() and len(_q) == 6:
+                try:
+                    import requests as _req
+                    _om_url = (
+                        f"https://www.onemap.gov.sg/api/common/elastic/search"
+                        f"?searchVal={_q}&returnGeom=Y&getAddrDetails=Y&pageNum=1"
+                    )
+                    _om_resp = _req.get(_om_url, timeout=5)
+                    _om_data = _om_resp.json()
+                    _om_results = _om_data.get("results", [])
+                    if _om_results:
+                        _r0 = _om_results[0]
+                        _found_coords = (float(_r0["LATITUDE"]), float(_r0["LONGITUDE"]))
+                        _addr_str = _r0.get("ADDRESS", _q)
+                        _bld_name = _r0.get("BLK_NO", "") + " " + _r0.get("ROAD_NAME", "")
+                        loc_label = _r0.get("BUILDING","").title() or _bld_name.title() or _addr_str
+                        st.success(f"📍 **{loc_label}** · {_addr_str}")
+                    else:
+                        st.warning(f"Postal code {_q} not found on OneMap. Try the project name instead.")
+                except Exception as _oe:
+                    st.warning(f"Postal lookup failed: {_oe}")
+
+            # ── Path B: project name → URA transaction cache ──────────────────
+            if not _found_coords:
+                try:
+                    from data.ura_pipeline import load_all_transactions as _load_txns
+                    from data.svy21 import svy21_to_wgs84
+                    _all_txns = _load_txns()
+                    _q_lower = _q.lower()
+                    _matched = [t for t in _all_txns if _q_lower in t.get("project", "").lower()]
+                    if _matched:
+                        _m = _matched[0]
+                        _x = float(_m.get("x", "0") or 0)
+                        _y = float(_m.get("y", "0") or 0)
+                        if _x > 0 and _y > 0:
+                            _found_coords = svy21_to_wgs84(_x, _y)
+                        else:
+                            _d = int(_m.get("district", 9) or 9)
+                            _found_coords = DISTRICT_CENTROIDS.get(_d, (1.3521, 103.8198))
+                        loc_label = _m.get("project", _q).title()
+                        search_project_name = _m.get("project", "")
+                        st.success(f"📍 **{loc_label}** (from URA transactions cache)")
+
+                        # Show matching projects if multiple
+                        _uniq_projects = sorted({t.get("project","") for t in _matched if t.get("project")})
+                        if len(_uniq_projects) > 1:
+                            with st.expander(f"🔎 {len(_uniq_projects)} matching projects — click to refine"):
+                                _sel_proj = st.selectbox("Select project", _uniq_projects, key="mrt_proj_sel")
+                                _proj_txns = [t for t in _all_txns if t.get("project","") == _sel_proj]
+                                if _proj_txns:
+                                    _pt = _proj_txns[0]
+                                    _px, _py = float(_pt.get("x","0") or 0), float(_pt.get("y","0") or 0)
+                                    if _px > 0 and _py > 0:
+                                        _found_coords = svy21_to_wgs84(_px, _py)
+                                    loc_label = _sel_proj.title()
+                    else:
+                        if not (_q.isdigit() and len(_q) == 6):
+                            st.warning(f"No URA transactions found for '{_q}'. Try a shorter keyword or exact postal code.")
+                except Exception as _ue:
+                    if not _found_coords:
+                        st.caption(f"Project search: {_ue}")
 
         if _found_coords:
             coords = _found_coords
-            st.success(f"📍 Located: **{loc_label}**")
         elif addr_query:
-            st.warning("Project not found in URA cache. Try a different name or select a town/district above.")
             coords = (1.3521, 103.8198)
             loc_label = "Singapore (default)"
 
@@ -3184,9 +3305,9 @@ elif tab_select == "🗺️ MRT Map":
         # — Transaction heatmap overlay --------------------------------------
         if show_txn:
             try:
-                from data.ura_pipeline import load_cache
+                from data.ura_pipeline import load_all_transactions as _load_heatmap_txns
                 from data.svy21 import svy21_to_wgs84
-                _all_txns = load_cache("transactions")
+                _all_txns = _load_heatmap_txns()
                 _heat_pts = []
                 _txn_markers = []
                 _rad_m = radius_km * 1000

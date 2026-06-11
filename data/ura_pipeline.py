@@ -248,6 +248,29 @@ def sync_all_batches():
     return total
 
 
+def load_all_transactions() -> list[dict]:
+    """
+    Load all cached URA transactions from all batches.
+    Returns a flat list of normalised transaction dicts.
+    This is the correct way to bulk-read the cache.
+    """
+    all_txns = []
+    for batch in range(1, 5):
+        cache_path = CACHE_DIR / f"transactions_batch{batch}.json"
+        if cache_path.exists():
+            try:
+                data = json.loads(cache_path.read_text())
+                txns = data["transactions"] if isinstance(data, dict) else data
+                all_txns.extend(txns)
+            except Exception:
+                pass
+    return all_txns
+
+
+# Alias for backwards compatibility
+load_cache = load_all_transactions
+
+
 # Allow running as script
 if __name__ == "__main__":
     sync_all_batches()
