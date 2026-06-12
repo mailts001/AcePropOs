@@ -3175,6 +3175,36 @@ elif tab_select == "🗺️ MRT Map":
     # Radius filter for amenities
     radius_km = st.slider("Show amenities within (km)", 0.5, 5.0, 2.0, 0.5, key="ov_radius")
 
+    # ── Transaction filters (shown only when Transactions overlay is on) ──────
+    if show_txn:
+        with st.expander("🔧 Transaction Filters & Display", expanded=True):
+            _tf_c1, _tf_c2, _tf_c3, _tf_c4 = st.columns(4)
+            with _tf_c1:
+                _txn_psf_min, _txn_psf_max = st.slider(
+                    "PSF Range (SGD)", 200, 5000, (500, 3000), step=100, key="txn_psf_range"
+                )
+            with _tf_c2:
+                _txn_type = st.selectbox(
+                    "Property Type", ["All", "Condominium", "Apartment", "Executive Condominium", "HDB Resale"],
+                    key="txn_type_filter"
+                )
+            with _tf_c3:
+                _txn_date_from = st.selectbox(
+                    "From Year", list(range(2015, date.today().year + 1)),
+                    index=5, key="txn_year_from"
+                )
+            with _tf_c4:
+                _txn_colour_by = st.radio(
+                    "Colour dots by",
+                    ["PSF", "Price", "Age (year)"],
+                    horizontal=True, key="txn_colour_by"
+                )
+    else:
+        _txn_psf_min, _txn_psf_max = 0, 99999
+        _txn_type = "All"
+        _txn_date_from = 2015
+        _txn_colour_by = "PSF"
+
     # ── MRT connectivity stats ───────────────────────────────────────────────
     stations = nearest_mrt(coords[0], coords[1], top_n=8)
     if stations:
@@ -3297,15 +3327,34 @@ elif tab_select == "🗺️ MRT Map":
                         icon=folium.Icon(color="darkgreen", icon="tree", prefix="fa")
                     ).add_to(m)
 
-        # — Transaction heatmap overlay --------------------------------------
+        # — Transaction heatmap overlay (with filters) -----------------------
         if show_txn:
             try:
                 from data.ura_pipeline import load_all_transactions as _load_heatmap_txns
                 from data.svy21 import svy21_to_wgs84
                 _all_txns = _load_heatmap_txns()
-                _heat_pts = []
+                _heat_pts  = []
                 _txn_markers = []
                 _rad_m = radius_km * 1000
+                _filtered_count = 0
+
+                # Colour helper based on selected mode
+                def _txn_dot_color(t, mode):
+                    if mode == "PSF":
+                        p = float(t.get("psf","0") or t.get("unitPrice","0") or 0)
+                        return ("darkred" if p >= 2500 else "red" if p >= 2000 else
+                                "orange" if p >= 1500 else "blue" if p >= 1000 else "lightblue")
+                    elif mode == "Price":
+                        p = float(t.get("price","0") or t.get("transactionPrice","0") or 0)
+                        return ("darkred" if p >= 3_000_000 else "red" if p >= 1_500_000 else
+                                "orange" if p >= 800_000 else "blue" if p >= 400_000 else "lightblue")
+                    else:  # Age (year)
+                        d = str(t.get("contractDate","") or t.get("saleDate",""))
+                        yr = int(d[-4:]) if len(d) >= 4 and d[-4:].isdigit() else \
+                             int(d[:4]) if len(d) >= 4 and d[:4].isdigit() else 2020
+                        return ("darkred" if yr >= 2023 else "orange" if yr >= 2020 else
+                                "blue" if yr >= 2017 else "lightblue")
+
                 for _t in _all_txns:
                     try:
                         _x = float(_t.get("x","0") or 0)
@@ -3317,42 +3366,71 @@ elif tab_select == "🗺️ MRT Map":
                         _d = ((_tlat - coords[0])**2 + (_tlon - coords[1])**2)**0.5 * 111320
                         if _d > _rad_m:
                             continue
-                        _psf = float(_t.get("psf","0") or _t.get("price_psf","0") or 0)
+
+                        # ── Apply filters ──────────────────────────────────
+                        _psf   = float(_t.get("psf","0") or _t.get("unitPrice","0") or 0)
+                        _price = float(_t.get("price","0") or _t.get("transactionPrice","0") or 0)
+                        _ptype = str(_t.get("propertyType","") or _t.get("property_type","")).lower()
+
+                        if _psf < _txn_psf_min or (_psf > _txn_psf_max and _psf > 0):
+                            continue
+                        if _txn_type != "All" and _txn_type.lower() not in _ptype:
+                            continue
+                        # Date filter
+                        _date_str = str(_t.get("contractDate","") or _t.get("saleDate",""))
+                        _yr = 0
+                        if "/" in _date_str and len(_date_str) >= 7:
+                            try: _yr = int(_date_str[-4:])
+                            except: pass
+                        elif len(_date_str) >= 4 and _date_str[:4].isdigit():
+                            _yr = int(_date_str[:4])
+                        if _yr > 0 and _yr < _txn_date_from:
+                            continue
+
+                        # Estimate rental yield: PSF × area × 4.5% / 12 → monthly rent
+                        _area  = float(_t.get("area","0") or _t.get("floorArea","0") or 0)
+                        _est_rent = round(_psf * _area * 0.045 / 12) if _psf and _area else 0
+                        _est_yield = round(_psf * _area * 0.045 / _price * 100, 1) if _price and _psf and _area else 0
+
                         _heat_pts.append([_tlat, _tlon, min(_psf / 3000, 1.0)])
-                        if len(_txn_markers) < 50:
-                            _txn_markers.append((_tlat, _tlon, _t))
+                        _filtered_count += 1
+                        if len(_txn_markers) < 80:
+                            _txn_markers.append((_tlat, _tlon, _t, _psf, _price, _est_rent, _est_yield))
                     except Exception:
                         continue
+
                 if _heat_pts:
-                    HeatMap(_heat_pts, radius=20, blur=15, min_opacity=0.3).add_to(m)
-                # Dot markers for nearest 30 transactions
-                for _tlat, _tlon, _t in _txn_markers[:30]:
-                    _psf = float(_t.get("psf","0") or 0)
-                    _price = float(_t.get("price","0") or 0)
-                    _proj = _t.get("project","")
-                    _area = _t.get("area","")
-                    _date = _t.get("contractDate","")
+                    HeatMap(_heat_pts, radius=18, blur=14, min_opacity=0.3).add_to(m)
+
+                _txn_cluster = MarkerCluster(name="Transactions", show=True).add_to(m)
+                for _tlat, _tlon, _t, _psf, _price, _est_rent, _est_yield in _txn_markers[:80]:
+                    _proj  = (_t.get("project","") or "").title()
+                    _area  = _t.get("area","") or _t.get("floorArea","")
+                    _ptype_str = (_t.get("propertyType","") or "").title()
+                    _date_str  = _t.get("contractDate","") or _t.get("saleDate","")
                     _popup_html = (
-                        f"<b>{_proj}</b><br>"
-                        f"PSF: <b>${_psf:,.0f}</b><br>"
-                        f"Price: ${_price:,.0f}<br>"
-                        f"Area: {_area} sqft<br>"
-                        f"Date: {_date}"
+                        f"<div style='min-width:180px'>"
+                        f"<b style='font-size:13px'>{_proj or _ptype_str}</b><br>"
+                        f"<span style='color:#c0392b;font-weight:700'>PSF: ${_psf:,.0f}</span><br>"
+                        f"Price: SGD {_price:,.0f}<br>"
+                        + (f"Area: {_area} sqft<br>" if _area else "")
+                        + (f"<span style='color:#27ae60'>Est. rent: ~${_est_rent:,}/mo · yield ~{_est_yield}%</span><br>" if _est_rent else "")
+                        + f"Date: {_date_str}<br>"
+                        f"Type: {_ptype_str}"
+                        f"</div>"
                     )
-                    _dot_color = (
-                        "darkred" if _psf >= 2500 else
-                        "red" if _psf >= 2000 else
-                        "orange" if _psf >= 1500 else
-                        "blue" if _psf >= 1000 else "lightblue"
-                    )
+                    _dot_color = _txn_dot_color(_t, _txn_colour_by)
                     folium.CircleMarker(
                         [_tlat, _tlon], radius=5,
-                        color=_dot_color, fill=True, fill_color=_dot_color, fill_opacity=0.7,
-                        popup=folium.Popup(_popup_html, max_width=220),
-                        tooltip=f"{_proj} — ${_psf:,.0f} psf"
-                    ).add_to(m)
-                if not _heat_pts:
-                    st.caption("No URA transactions with coordinates found within range.")
+                        color=_dot_color, fill=True, fill_color=_dot_color, fill_opacity=0.75,
+                        popup=folium.Popup(_popup_html, max_width=240),
+                        tooltip=f"{_proj or _ptype_str} — ${_psf:,.0f} psf"
+                    ).add_to(_txn_cluster)
+
+                if _heat_pts:
+                    st.caption(f"💰 {_filtered_count:,} transactions in range match your filters.")
+                else:
+                    st.caption("No transactions found in range — try widening the radius or adjusting PSF filters.")
             except Exception as _te:
                 st.caption(f"Transaction overlay error: {_te}")
 
@@ -3370,7 +3448,13 @@ elif tab_select == "🗺️ MRT Map":
         if show_mall:     _legend_items.append("🟣 Shopping mall")
         if show_school:   _legend_items.append("🟢 Primary school")
         if show_park:     _legend_items.append("🌿 Park / nature reserve")
-        if show_txn:      _legend_items.append("💰 Transaction dot: 🔴 ≥$2k psf · 🟠 ≥$1.5k · 🔵 <$1.5k psf · heatmap = density")
+        if show_txn:
+            if _txn_colour_by == "PSF":
+                _legend_items.append("💰 Dot colour by PSF: 🔴 ≥$2.5k · 🟠 ≥$2k · 🟡 ≥$1.5k · 🔵 ≥$1k · 💠 <$1k | heatmap = density")
+            elif _txn_colour_by == "Price":
+                _legend_items.append("💰 Dot colour by Price: 🔴 ≥$3M · 🟠 ≥$1.5M · 🟡 ≥$800k · 🔵 ≥$400k · 💠 <$400k")
+            else:
+                _legend_items.append("💰 Dot colour by Year: 🔴 ≥2023 · 🟠 ≥2020 · 🔵 ≥2017 · 💠 earlier | popup shows est. yield")
         if _legend_items:
             st.caption("  ·  ".join(_legend_items))
 
@@ -4425,6 +4509,36 @@ elif tab_select == "⚙️ Admin":
                 st.caption(f"Current: **{_ti['tier'].upper()}** · {_ti['alerts_used_this_week']} alerts this week · expires {_ti.get('expires_at','—')}")
             except Exception:
                 pass
+
+        st.divider()
+        # ── Weekly Digest ──────────────────────────────────────────────────────
+        st.subheader("📧 Weekly Digest")
+        _dg_c1, _dg_c2 = st.columns(2)
+        with _dg_c1:
+            if st.button("🔍 Preview Digest HTML", key="digest_preview"):
+                with st.spinner("Building digest..."):
+                    try:
+                        from agents.weekly_digest import build_digest_html as _build_dg
+                        _dg_html = _build_dg()
+                        st.markdown("**Digest preview (raw HTML length):**")
+                        st.code(f"{len(_dg_html):,} characters", language=None)
+                        with st.expander("Show raw HTML"):
+                            st.code(_dg_html[:3000] + "...", language="html")
+                    except Exception as _dge:
+                        st.error(f"Preview error: {_dge}")
+        with _dg_c2:
+            if st.button("🚀 Send Weekly Digest Now", type="primary", key="digest_send"):
+                with st.spinner("Sending to all subscribers..."):
+                    try:
+                        from agents.weekly_digest import send_weekly_digest as _send_dg
+                        _dg_result = _send_dg(dry_run=False)
+                        st.success(
+                            f"✅ Digest sent: **{_dg_result['sent']} delivered**, "
+                            f"{_dg_result.get('failed',0)} failed"
+                        )
+                    except Exception as _dge:
+                        st.error(f"Send error: {_dge}")
+        st.caption("Cron: Sunday 8 AM SGT — `python3 /root/propos/agents/weekly_digest.py`")
 
         st.divider()
         # ── Subscriber Management ──────────────────────────────────────────────
