@@ -405,10 +405,17 @@ with st.sidebar:
             "💹 Stamp Duty & ROI",
             "🎁 CPF Grants",
             "🏠↔️ Rent vs Buy",
+            "⬆️ HDB Upgrader",
+            "🏛️ Property Tax",
+            "🔄 Refi Alert",
+        ],
+        "📈 Price History": [
+            "📈 Price History",
         ],
         "🛡️ Protect": [
             "🛡️ Insurance",
             "🔔 Watchlist & Alerts",
+            "⏳ SSD Timer",
         ],
         "💼 My Portfolio": ["💼 Portfolio"],
         "🤝 Partners": ["🤝 Partners"],
@@ -3806,6 +3813,451 @@ We'll respond within 2 business days.
         "PropOS is built on Singapore government open data (HDB Resale data.gov.sg, URA transaction data) "
         "and AI analysis. All partnership arrangements are subject to MAS and CEA guidelines where applicable."
     )
+
+# ── SSD Timer ────────────────────────────────────────────────────────────────
+elif tab_select == "⏳ SSD Timer":
+    st.header("⏳ Seller's Stamp Duty (SSD) Timer")
+    st.caption("Know exactly how long before you can sell penalty-free — and how much you'd save by waiting")
+
+    from agents.ssd_calculator import analyse as _ssd_analyse
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _ssd_purchase_price = st.number_input("Purchase Price (SGD)", 200_000, 10_000_000, 800_000, step=10_000, key="ssd_pp")
+    with col2:
+        _ssd_purchase_date  = st.date_input("Purchase Date", value=date(2024, 1, 15), key="ssd_pd")
+    with col3:
+        _ssd_sale_price     = st.number_input("Estimated Sale Price (SGD, 0 = same as purchase)", 0, 10_000_000, 0, step=10_000, key="ssd_sp")
+
+    if st.button("Calculate SSD", type="primary", key="ssd_calc"):
+        _ssd_sp = _ssd_sale_price if _ssd_sale_price > 0 else None
+        _ssd_res = _ssd_analyse(_ssd_purchase_price, _ssd_purchase_date, _ssd_sp)
+
+        if _ssd_res.is_ssd_free:
+            st.success(f"✅ **SSD-free!** You held for {_ssd_res.months_held} months — no stamp duty on sale.")
+        else:
+            st.warning(
+                f"⚠️ **SSD applies.** You've held for **{_ssd_res.months_held} months** — "
+                f"currently in the **{_ssd_res.ssd_rate_pct:.0f}% SSD bracket**."
+            )
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Months Held", _ssd_res.months_held)
+        col2.metric("SSD Rate", f"{_ssd_res.ssd_rate_pct:.0f}%")
+        col3.metric("SSD Payable", f"SGD {_ssd_res.ssd_amount:,.0f}")
+        col4.metric("Days to SSD-Free", f"{_ssd_res.days_to_ssd_free:,}" if not _ssd_res.is_ssd_free else "0")
+
+        st.divider()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.subheader("💰 Net Proceeds")
+            st.metric("If you sell NOW", f"SGD {_ssd_res.net_proceeds_now:,.0f}")
+            st.metric(f"If you wait until {_ssd_res.ssd_free_date.strftime('%b %Y')}", f"SGD {_ssd_res.net_proceeds_after_ssd:,.0f}")
+            if _ssd_res.savings_if_wait > 0:
+                st.info(f"💡 Waiting saves you **SGD {_ssd_res.savings_if_wait:,.0f}** in SSD.")
+
+        with col_b:
+            st.subheader("📅 SSD Rate Schedule")
+            import pandas as _pd
+            _ssd_df = _pd.DataFrame(_ssd_res.year_brackets)
+            _ssd_df["You are here"] = _ssd_df["current"].apply(lambda x: "← HERE" if x else "")
+            _ssd_df = _ssd_df[["period","rate_pct","ssd_on_price","You are here"]].rename(columns={
+                "period": "Holding Period", "rate_pct": "SSD Rate (%)",
+                "ssd_on_price": "SSD on Est. Price (SGD)"
+            })
+            st.dataframe(_ssd_df, use_container_width=True, hide_index=True)
+
+# ── Refi Alert ────────────────────────────────────────────────────────────────
+elif tab_select == "🔄 Refi Alert":
+    st.header("🔄 Mortgage Refinancing Analyser")
+    st.caption("Find out if switching your home loan saves money — accounting for legal fees, clawback, and break-even")
+
+    from agents.refi_alert import analyse_refi as _refi_analyse, MARKET_RATES as _MR
+
+    st.info(f"📊 Current market rates (updated Jun 2026): Best fixed 2Y **{_MR['best_fixed_2y']}%** | "
+            f"SORA 3M **{_MR['sora_3m']}%** | HDB loan **{_MR['hdb_loan']}%**")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        _refi_loan = st.number_input("Outstanding Loan Balance (SGD)", 100_000, 5_000_000, 600_000, step=10_000)
+        _refi_rate = st.number_input("Current Interest Rate (%)", 1.0, 8.0, 4.5, step=0.05, format="%.2f")
+        _refi_tenure = st.number_input("Remaining Tenure (months)", 12, 360, 240)
+    with col2:
+        _refi_lockin = st.number_input("Remaining Lock-In Period (years, 0 = none)", 0.0, 3.0, 0.0, step=0.5)
+        _refi_clawback = st.number_input("Clawback Penalty (% of loan, 0 = none)", 0.0, 3.0, 0.0, step=0.25, format="%.2f")
+        _refi_proptype = st.selectbox("Property Type", ["private", "hdb"])
+
+    if st.button("Analyse Refinancing", type="primary", key="refi_calc"):
+        _refi_res = _refi_analyse(
+            outstanding_loan=_refi_loan,
+            current_rate_pct=_refi_rate,
+            remaining_tenure_months=_refi_tenure,
+            lock_in_years=_refi_lockin,
+            clawback_pct=_refi_clawback,
+            property_type=_refi_proptype,
+        )
+
+        if _refi_res.recommended:
+            st.success(f"✅ **Recommended to refinance!**")
+        else:
+            st.warning(f"⏸️ **Not recommended right now.**")
+
+        st.markdown(_refi_res.verdict)
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Monthly Savings", f"SGD {_refi_res.monthly_savings:,}")
+        col2.metric("Annual Savings", f"SGD {_refi_res.annual_savings:,}")
+        col3.metric("Break-Even", f"{_refi_res.breakeven_months} months")
+        col4.metric("Net Savings (5Y)", f"SGD {_refi_res.savings_over_5y:,}")
+
+        st.divider()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.subheader("💸 Refinancing Costs")
+            st.metric("Legal + Valuation Fees", f"SGD {3100:,}")
+            st.metric("Clawback Penalty", f"SGD {_refi_res.clawback_sgd:,}")
+            st.metric("Total Cost", f"SGD {_refi_res.total_refi_cost:,}")
+        with col_b:
+            st.subheader("📊 Rate Comparison")
+            import pandas as _pd
+            _refi_df = _pd.DataFrame(_refi_res.rate_comparison)
+            st.dataframe(_refi_df, use_container_width=True, hide_index=True)
+
+        if _refi_res.recommended:
+            with st.expander("📞 Get a free mortgage consultation"):
+                st.markdown("""
+Our partner mortgage brokers can help you compare packages across all major Singapore banks —
+**DBS, OCBC, UOB, Standard Chartered, HSBC, Maybank** — at no cost to you.
+
+**What they handle:**
+- Rate comparisons across 15+ bank packages
+- Lock-in vs floating analysis for your situation
+- Processing refinancing paperwork end-to-end
+- MRTA/MLTA insurance bundling (saves additional ~SGD 2,000–5,000)
+                """)
+                _refi_name  = st.text_input("Name", key="refi_broker_name")
+                _refi_email = st.text_input("Email", key="refi_broker_email")
+                _refi_phone = st.text_input("Phone (optional)", key="refi_broker_phone")
+                if st.button("Request Free Consultation", type="primary", key="refi_broker_submit"):
+                    if _refi_email:
+                        try:
+                            from data.analytics import log_broker_lead as _lbl
+                            _lbl(_refi_name, _refi_email, _refi_phone, _refi_loan, "refi", "asap",
+                                 f"Current rate: {_refi_rate}%, savings: SGD {_refi_res.monthly_savings}/mo")
+                        except Exception:
+                            pass
+                        st.success("✅ We'll connect you with a mortgage specialist within 24 hours!")
+
+# ── HDB Upgrader ──────────────────────────────────────────────────────────────
+elif tab_select == "⬆️ HDB Upgrader":
+    st.header("⬆️ HDB Upgrader Path Calculator")
+    st.caption("Calculate your private condo budget after selling your HDB — including CPF refund, ABSD timing, and TDSR check")
+
+    from agents.hdb_upgrader import calculate_upgrade as _hdb_upg
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Your HDB Details")
+        _upg_val       = st.number_input("Estimated HDB Value (SGD)", 300_000, 2_000_000, 550_000, step=5_000)
+        _upg_pd        = st.date_input("HDB Purchase Date", value=date(2018, 6, 1), key="upg_pd")
+        _upg_loan      = st.number_input("Outstanding HDB Loan (SGD)", 0, 2_000_000, 200_000, step=5_000)
+        _upg_cpf       = st.number_input("CPF Used for HDB (SGD, principal only)", 0, 1_000_000, 80_000, step=5_000)
+        _upg_loan_rate = st.number_input("HDB Loan Rate (%)", 1.0, 5.0, 2.6, step=0.1, format="%.1f")
+        _upg_tenure    = st.number_input("Original HDB Loan Tenure (years)", 5, 30, 25)
+    with col2:
+        st.subheader("Your Profile")
+        _upg_income    = st.number_input("Gross Monthly Income (SGD, household)", 3_000, 50_000, 12_000, step=500)
+        _upg_cpf_oa    = st.number_input("Current CPF OA Balance (SGD)", 0, 1_000_000, 60_000, step=5_000)
+        _upg_other_debt= st.number_input("Other Monthly Debt Obligations (SGD)", 0, 10_000, 0, step=100)
+        _upg_condo_rate= st.number_input("Private Condo Loan Rate (%)", 2.0, 6.0, 3.5, step=0.1, format="%.1f")
+        _upg_condo_ten = st.number_input("Condo Loan Tenure (years)", 5, 30, 25)
+        _upg_buy_first = st.checkbox("Buying condo BEFORE selling HDB? (ABSD applies)", value=False)
+
+    if st.button("Calculate Upgrade Path", type="primary", key="upg_calc"):
+        _upg_res = _hdb_upg(
+            hdb_current_value=_upg_val,
+            hdb_purchase_date=_upg_pd,
+            hdb_outstanding_loan=_upg_loan,
+            hdb_cpf_used=_upg_cpf,
+            hdb_loan_rate_pct=_upg_loan_rate,
+            hdb_tenure_years=_upg_tenure,
+            gross_monthly_income=_upg_income,
+            cpf_oa_balance=_upg_cpf_oa,
+            other_monthly_debt=_upg_other_debt,
+            condo_loan_rate_pct=_upg_condo_rate,
+            condo_loan_tenure_years=_upg_condo_ten,
+            buy_before_selling_hdb=_upg_buy_first,
+        )
+
+        st.markdown(_upg_res.verdict)
+
+        for w in _upg_res.warnings:
+            st.warning(w)
+
+        st.divider()
+        st.subheader("🏦 HDB Sale Proceeds Breakdown")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Estimated Value",     f"SGD {_upg_res.hdb_estimated_value:,}")
+        col1.metric("Outstanding Loan",    f"- SGD {_upg_res.hdb_outstanding_loan:,}")
+        col2.metric("CPF to Refund (OA)",  f"- SGD {_upg_res.hdb_cpf_to_refund:,}")
+        col2.metric("Agent Commission",    f"- SGD {_upg_res.hdb_agent_commission:,}")
+        col3.metric("SSD (if applicable)", f"- SGD {_upg_res.hdb_ssd:,}")
+        col3.metric("Net Cash Proceeds",   f"SGD {_upg_res.hdb_net_cash:,}")
+
+        st.divider()
+        st.subheader("🏠 Private Condo Budget")
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Conservative",  f"SGD {_upg_res.budget_range['conservative']:,}")
+        col_b.metric("Mid Budget",    f"SGD {_upg_res.budget_range['mid']:,}",       delta="Recommended")
+        col_c.metric("Stretch",       f"SGD {_upg_res.budget_range['stretch']:,}")
+
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Max Loan (TDSR)", f"SGD {_upg_res.max_loan_by_tdsr:,}")
+        col2.metric("Est. Monthly Instalment", f"SGD {_upg_res.monthly_instalment_estimate:,}/mo")
+        col3.metric("TDSR Used", f"{_upg_res.tdsr_used_pct}%",
+                    delta="✅ OK" if _upg_res.tdsr_used_pct <= 55 else "⚠️ Over limit",
+                    delta_color="normal" if _upg_res.tdsr_used_pct <= 55 else "inverse")
+
+        st.divider()
+        st.subheader("⚠️ ABSD Considerations")
+        col_a, col_b = st.columns(2)
+        col_a.metric("ABSD if buy BEFORE selling HDB", f"SGD {_upg_res.absd_if_buy_before_sell:,}", delta="20% penalty")
+        col_b.metric("ABSD if buy AFTER selling HDB",  f"SGD 0", delta="No ABSD ✅")
+        st.info("💡 **Sell your HDB first**, then buy the condo — you reset to first-property status (0% ABSD). "
+                "If you must buy first, apply for **ABSD Remission** (must sell HDB within 6 months of condo purchase).")
+
+        with st.expander("📞 Connect with a Property Specialist"):
+            st.markdown("Our partner CEA-licensed property agents specialise in HDB-to-condo upgrades. Free consultation.")
+            _upg_name  = st.text_input("Name", key="upg_name")
+            _upg_email = st.text_input("Email", key="upg_email")
+            if st.button("Request Agent", type="primary", key="upg_agent"):
+                if _upg_email:
+                    try:
+                        from data.analytics import log_broker_lead as _lbl
+                        _lbl(_upg_name, _upg_email, "", _upg_val, "hdb_upgrade", "3-6 months",
+                             f"Budget SGD {_upg_res.budget_range['mid']:,}, income SGD {_upg_income:,}/mo")
+                    except Exception:
+                        pass
+                    st.success("✅ A property specialist will contact you within 1 business day!")
+
+# ── Property Tax ──────────────────────────────────────────────────────────────
+elif tab_select == "🏛️ Property Tax":
+    st.header("🏛️ Singapore Property Tax Calculator")
+    st.caption("Calculate your annual property tax and find the best investment strategy to offset it — T-bill laddering, CPF, SSBs and more")
+
+    from agents.property_tax import analyse as _ptax_analyse, INVESTMENT_RATES as _PTAX_RATES
+    from datetime import date as _ddate
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _ptax_av = st.number_input(
+            "Annual Value (AV) of Property (SGD)",
+            help="IRAS assesses AV as the estimated annual rental value. Check your IRAS notice or myTax Portal.",
+            min_value=5_000, max_value=500_000, value=24_000, step=1_000
+        )
+    with col2:
+        _ptax_oo = st.radio("Owner-Occupier Status", ["Owner-Occupied (live in it)", "Non-Owner-Occupier (renting out / investment)"], horizontal=False)
+        _ptax_oo_bool = "Owner-Occupied" in _ptax_oo
+    with col3:
+        st.markdown("**Tax Due Date**")
+        st.markdown("IRAS issues assessment in Dec/Jan.")
+        st.markdown("**Payment deadline: 31 January** each year.")
+        st.markdown("Late payment: 5% penalty, then 2%/month.")
+
+    if st.button("Calculate Property Tax", type="primary", key="ptax_calc"):
+        _ptax_res = _ptax_analyse(_ptax_av, _ptax_oo_bool)
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Annual Value", f"SGD {_ptax_res.annual_value:,}")
+        col2.metric("Property Tax", f"SGD {_ptax_res.tax_amount:,}", delta="/year")
+        col3.metric("Effective Rate", f"{_ptax_res.effective_rate_pct:.2f}%")
+        col4.metric("Days to Jan 31", f"{_ptax_res.days_to_jan31} days")
+
+        st.divider()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.subheader("📊 Tax Breakdown by Band")
+            import pandas as _pd
+            _ptax_df = _pd.DataFrame(_ptax_res.band_breakdown)
+            _ptax_df = _ptax_df[["band","rate_pct","av_in_band","tax"]].rename(columns={
+                "band": "AV Band", "rate_pct": "Rate (%)", "av_in_band": "AV in Band (SGD)", "tax": "Tax (SGD)"
+            })
+            st.dataframe(_ptax_df, use_container_width=True, hide_index=True)
+
+            st.caption(f"Rates: {'Owner-Occupier progressive 0–32%' if _ptax_oo_bool else 'Non-Owner-Occupier 11–27%'}")
+            if not _ptax_oo_bool:
+                st.info("💡 **Tip:** If this is your primary residence, you may qualify for owner-occupier rates (much lower). Apply via myTax Portal.")
+
+        with col_b:
+            st.subheader("✅ Best Way to Pay")
+            st.success(f"**Recommended: {_ptax_res.recommended_instrument}**")
+            st.markdown(_ptax_res.recommended_notes)
+
+        st.divider()
+        st.subheader("💹 Investment Options to Offset Your Property Tax")
+        st.caption(
+            f"Invest now so returns cover SGD {_ptax_res.tax_amount:,} by {_ptax_res.next_jan31.strftime('%d %b %Y')} "
+            f"({_ptax_res.days_to_jan31} days away)"
+        )
+
+        for opt in _ptax_res.investment_options:
+            risk_color = {"Very Low": "🟢", "Zero": "✅", "Medium (price fluctuation)": "🟡"}.get(opt["risk"], "⚪")
+            with st.expander(
+                f"{risk_color} **{opt['instrument']}** — {opt['rate_pa']}% p.a. | "
+                f"Need: SGD {opt['principal_needed']:,} → Returns SGD {opt['return_generated']:,}"
+            ):
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Principal Needed", f"SGD {opt['principal_needed']:,}")
+                col2.metric("Return Generated", f"SGD {opt['return_generated']:,}")
+                col3.metric("Risk Level", opt["risk"])
+                st.markdown(f"**Liquidity:** {opt['liquidity']}")
+                st.markdown(f"**Notes:** {opt['notes']}")
+                if opt.get("cpf_eligible"):
+                    st.info("🏦 **CPF Path:** Login to CPF Board portal → My Requests → Property → Pay property tax using CPF savings. Or set up GIRO from CPF OA via IRAS.")
+
+        st.divider()
+        st.subheader("📅 T-Bill Laddering Strategy")
+        st.caption("Stagger T-bill purchases so they mature just before Jan 31 — maximise yield while ensuring liquidity")
+        for step in _ptax_res.tbill_ladder:
+            st.markdown(f"**Tranche {step['tranche']}:** {step['action']}")
+
+        with st.expander("ℹ️ How to buy Singapore T-bills"):
+            st.markdown("""
+**Via Internet Banking (DBS/OCBC/UOB):**
+1. Login → Invest → Singapore Government Securities (SGS)
+2. Select T-bill auction (6M or 1Y)
+3. Enter bid amount and yield (or apply for non-competitive bid to guarantee allocation)
+4. Settlement: 2 business days after auction
+
+**Via CDP Account:**
+- Open CDP account at SGX before bidding
+- Link to your bank account
+
+**Auction schedule:** T-bill auctions held roughly every 4 weeks.
+Check: [MAS T-bill auctions](https://www.mas.gov.sg/bonds-and-bills/singapore-government-t-bills-information-for-individuals)
+
+**Minimum bid:** SGD 1,000 per application, multiples of SGD 1,000
+**Maximum individual:** No cap (CPF investments capped at SGD 20,000 per T-bill)
+            """)
+
+        st.divider()
+        st.subheader("📌 Current Indicative Yields")
+        import pandas as _pd
+        _yield_data = [
+            {"Instrument": "T-Bill (6M)",       "Rate (% p.a.)": _PTAX_RATES["tbill_6m"],  "Risk": "Very Low", "Min Amount": "SGD 1,000"},
+            {"Instrument": "T-Bill (1Y)",        "Rate (% p.a.)": _PTAX_RATES["tbill_1y"],  "Risk": "Very Low", "Min Amount": "SGD 1,000"},
+            {"Instrument": "Singapore Savings Bond", "Rate (% p.a.)": _PTAX_RATES["ssb_1y"], "Risk": "Very Low", "Min Amount": "SGD 500"},
+            {"Instrument": "Fixed Deposit (6M)", "Rate (% p.a.)": _PTAX_RATES["fd_6m"],     "Risk": "Very Low", "Min Amount": "SGD 10,000"},
+            {"Instrument": "CPF OA",             "Rate (% p.a.)": _PTAX_RATES["cpf_oa"],    "Risk": "Zero",     "Min Amount": "Own CPF OA"},
+            {"Instrument": "S-REITs (div yield)","Rate (% p.a.)": _PTAX_RATES["reits_div"], "Risk": "Medium",   "Min Amount": "~SGD 200+"},
+        ]
+        st.dataframe(_pd.DataFrame(_yield_data), use_container_width=True, hide_index=True)
+
+# ── Price History ─────────────────────────────────────────────────────────────
+elif tab_select == "📈 Price History":
+    st.header("📈 Project Price History")
+    st.caption("Track PSF trends by project, district, or property type — powered by 137,584+ URA transactions")
+
+    from agents.price_history import get_project_history as _ph_get, top_trending_projects as _ph_top, district_psf_trend as _ph_dist
+
+    _ph_tab1, _ph_tab2, _ph_tab3 = st.tabs(["🔍 Project Lookup", "🏆 Top Trending", "🗺️ By District"])
+
+    with _ph_tab1:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            _ph_project = st.text_input("Project / Development Name", placeholder="e.g. The Pinnacle @ Duxton, Jurong East St 32",
+                                         key="ph_project_name")
+        with col2:
+            _ph_proptype = st.selectbox("Filter by Type", ["All", "Condominium", "Apartment", "Executive Condominium", "Landed"],
+                                         key="ph_proptype")
+
+        if st.button("Load Price History", type="primary", key="ph_search") and _ph_project:
+            with st.spinner("Loading transaction history from URA cache..."):
+                try:
+                    from data.ura_pipeline import load_all_transactions as _load_ura
+                    _all_txns = _load_ura()
+                    _ph_ptype = None if _ph_proptype == "All" else _ph_proptype
+                    _ph_res = _ph_get(_ph_project, _all_txns, _ph_ptype)
+                except Exception as _phe:
+                    st.error(f"Error loading data: {_phe}")
+                    _ph_res = None
+
+            if _ph_res and _ph_res["match_count"] > 0:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Matching Transactions", f"{_ph_res['match_count']:,}")
+                col2.metric("Latest Median PSF", f"SGD {_ph_res['latest_median_psf']:,}")
+                col3.metric("PSF Change (all time)", f"{_ph_res['psf_change_pct']:+.1f}%",
+                            delta_color="normal" if _ph_res['psf_change_pct'] >= 0 else "inverse")
+
+                if _ph_res["quarters"]:
+                    import pandas as _pd
+                    _ph_df = _pd.DataFrame(_ph_res["quarters"])
+                    _ph_df = _ph_df.set_index("quarter")
+
+                    st.subheader("📈 Median PSF by Quarter")
+                    st.line_chart(_ph_df["median_psf"], height=300, use_container_width=True)
+
+                    st.subheader("📊 Quarterly Summary Table")
+                    _ph_show = _ph_df[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
+                        "median_psf": "Median PSF", "min_psf": "Min PSF", "max_psf": "Max PSF",
+                        "count": "# Txns", "median_price": "Median Price"
+                    })
+                    st.dataframe(_ph_show, use_container_width=True)
+                else:
+                    st.warning("No quarterly data found — try a broader project name.")
+            elif _ph_res:
+                st.warning(f"No transactions found for **{_ph_project}**. Try a partial name or check spelling.")
+
+    with _ph_tab2:
+        st.subheader("🏆 Top Trending Projects (Biggest PSF Appreciation)")
+        st.caption("Projects with highest PSF appreciation across all URA transactions — min 10 transactions")
+        if st.button("Load Top 10 Trending Projects", key="ph_top_btn"):
+            with st.spinner("Scanning 137k+ transactions... (may take 15–30 sec)"):
+                try:
+                    from data.ura_pipeline import load_all_transactions as _load_ura
+                    _all_txns = _load_ura()
+                    _ph_trending = _ph_top(_all_txns, min_txns=10, top_n=10)
+                except Exception as _te:
+                    st.error(f"Error: {_te}")
+                    _ph_trending = []
+
+            if _ph_trending:
+                import pandas as _pd
+                _trend_rows = []
+                for p in _ph_trending:
+                    _trend_rows.append({
+                        "Project": p["project"],
+                        "PSF Change": f"{p['psf_change_pct']:+.1f}%",
+                        "Earliest PSF": f"SGD {p['earliest_median_psf']:,}",
+                        "Latest PSF": f"SGD {p['latest_median_psf']:,}",
+                        "Txns": p["total_txns"],
+                        "Quarters": len(p["quarters"]),
+                    })
+                st.dataframe(_pd.DataFrame(_trend_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No data loaded yet.")
+
+    with _ph_tab3:
+        st.subheader("🗺️ District PSF Trend")
+        _ph_district = st.selectbox("Select District", list(range(1, 29)), format_func=lambda d: f"D{d:02d}", key="ph_district")
+        if st.button("Load District Trend", key="ph_dist_btn"):
+            with st.spinner("Loading district transactions..."):
+                try:
+                    from data.ura_pipeline import load_all_transactions as _load_ura
+                    _all_txns = _load_ura()
+                    _ph_dist_data = _ph_dist(_all_txns, str(_ph_district))
+                except Exception as _de:
+                    st.error(f"Error: {_de}")
+                    _ph_dist_data = []
+
+            if _ph_dist_data:
+                import pandas as _pd
+                _dist_df = _pd.DataFrame(_ph_dist_data).set_index("quarter")
+                st.line_chart(_dist_df["median_psf"], height=280, use_container_width=True)
+                st.dataframe(_dist_df, use_container_width=True)
+            else:
+                st.info(f"No data found for District {_ph_district}.")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
