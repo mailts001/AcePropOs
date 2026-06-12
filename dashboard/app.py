@@ -408,6 +408,7 @@ with st.sidebar:
             "⬆️ HDB Upgrader",
             "🏛️ Property Tax",
             "🔄 Refi Alert",
+            "🏘️ Rental Yield",
         ],
         "📈 Price History": [
             "📈 Price History",
@@ -4456,6 +4457,178 @@ elif tab_select == "📈 Price History":
                 st.dataframe(_dist_df, use_container_width=True)
             else:
                 st.info(f"No data found for District {_ph_district}.")
+
+# ── Rental Yield ─────────────────────────────────────────────────────────────
+elif tab_select == "🏘️ Rental Yield":
+    st.header("🏘️ Rental Yield Calculator")
+    st.caption("Full buy-to-let analysis — gross & net yield, monthly cashflow, breakeven rent, vs T-bills and REITs")
+
+    from agents.rental_yield import analyse as _ry_analyse, BENCHMARKS as _RY_BENCH
+
+    # ── Try to pre-fill rent from URA rental cache ────────────────────────────
+    _ry_rent_hint = None
+    with st.expander("🔍 Look up market rent by postal code (optional)", expanded=False):
+        _ry_pc = st.text_input("Postal code", max_chars=6, placeholder="e.g. 520123", key="ry_postal")
+        _ry_ft = st.selectbox("Flat / unit type", ["4 ROOM","3 ROOM","5 ROOM","EXECUTIVE","2 ROOM","Private (≤700sqft)","Private (700–1200sqft)","Private (>1200sqft)"], key="ry_flat")
+        if st.button("Get Market Rent", key="ry_rent_lookup"):
+            # Use URA rental data if available, else benchmark table
+            _RENT_BENCH = {
+                "2 ROOM": {"central": 1800, "mid": 1400, "outer": 1100},
+                "3 ROOM": {"central": 2800, "mid": 2200, "outer": 1800},
+                "4 ROOM": {"central": 3500, "mid": 2800, "outer": 2300},
+                "5 ROOM": {"central": 4200, "mid": 3400, "outer": 2800},
+                "EXECUTIVE": {"central": 5000, "mid": 4000, "outer": 3200},
+                "Private (≤700sqft)": {"central": 3500, "mid": 2800, "outer": 2200},
+                "Private (700–1200sqft)": {"central": 5500, "mid": 4200, "outer": 3200},
+                "Private (>1200sqft)": {"central": 9000, "mid": 6500, "outer": 4500},
+            }
+            _sector = int(_ry_pc[:2]) if _ry_pc and len(_ry_pc) >= 2 and _ry_pc[:2].isdigit() else 0
+            _zone = "outer"
+            if _sector in range(1, 12):   _zone = "central"
+            elif _sector in range(12,22): _zone = "mid"
+            elif _sector in range(22,30): _zone = "outer"
+            elif _sector in range(30,40): _zone = "mid"
+            elif _sector in range(40,60): _zone = "mid"
+            else:                          _zone = "outer"
+            _est = _RENT_BENCH.get(_ry_ft, {}).get(_zone, 2500)
+            st.info(f"📊 Market rent estimate for **{_ry_ft}** in zone **{_zone.title()}**: ~**SGD {_est:,}/month**  \nAdjust based on actual condition, floor level, and furnishing.")
+            st.session_state["ry_rent_prefill"] = _est
+
+    st.divider()
+
+    # ── Main inputs ───────────────────────────────────────────────────────────
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("🏠 Property Details")
+        _ry_price    = st.number_input("Purchase Price (SGD)", 200_000, 10_000_000, 800_000, step=10_000, key="ry_price")
+        _ry_area     = st.number_input("Floor Area (sqft, 0 = unknown)", 0, 5000, 1000, step=50, key="ry_area")
+        _ry_ptype    = st.selectbox("Property Type", ["condo","hdb","landed"], key="ry_ptype")
+        _ry_absd     = st.number_input("ABSD Paid (SGD, 0 if none)", 0, 2_000_000, 0, step=5_000, key="ry_absd")
+        _ry_hold_yrs = st.number_input("Expected Holding Period (years)", 1, 30, 10, key="ry_hold")
+
+    with col2:
+        st.subheader("💰 Rental & Financing")
+        _prefill_rent = st.session_state.get("ry_rent_prefill", 2800)
+        _ry_rent     = st.number_input("Expected Monthly Rent (SGD)", 500, 50_000, _prefill_rent, step=100, key="ry_rent")
+        _ry_vacancy  = st.slider("Vacancy Allowance (months/year)", 0.0, 3.0, 1.0, 0.5, key="ry_vacancy")
+        _ry_mortgaged = st.checkbox("Property is mortgaged", value=True, key="ry_mortgaged")
+        if _ry_mortgaged:
+            _ry_loan     = st.number_input("Outstanding Loan (SGD)", 0, 8_000_000, 600_000, step=10_000, key="ry_loan")
+            _ry_lrate    = st.number_input("Loan Rate (%)", 1.0, 8.0, 3.5, step=0.1, format="%.1f", key="ry_lrate")
+            _ry_ltenure  = st.number_input("Remaining Tenure (years)", 1, 35, 25, key="ry_ltenure")
+        else:
+            _ry_loan = _ry_lrate = _ry_ltenure = 0
+
+    if st.button("Calculate Rental Yield", type="primary", key="ry_calc"):
+        _ry_res = _ry_analyse(
+            purchase_price=_ry_price,
+            monthly_rent=_ry_rent,
+            floor_area_sqft=_ry_area,
+            property_type=_ry_ptype,
+            loan_amount=_ry_loan,
+            loan_rate_pct=_ry_lrate,
+            loan_tenure_years=int(_ry_ltenure) if _ry_ltenure else 25,
+            vacancy_months_per_year=_ry_vacancy,
+            absd_paid=_ry_absd,
+            holding_years=int(_ry_hold_yrs),
+        )
+
+        # ── Top metrics ──────────────────────────────────────────────────────
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Gross Yield",     f"{_ry_res.gross_yield_pct:.1f}%")
+        m2.metric("Net Yield",       f"{_ry_res.net_yield_pct:.1f}%",
+                  delta="✅ Above T-bill" if _ry_res.net_yield_pct >= _RY_BENCH["tbill_6m"] else "⚠️ Below T-bill")
+        m3.metric("Yield on Equity", f"{_ry_res.net_yield_on_equity_pct:.1f}%")
+        m4.metric("Monthly Cashflow",
+                  f"SGD {_ry_res.monthly_net_cashflow:+,.0f}",
+                  delta_color="normal" if _ry_res.monthly_net_cashflow >= 0 else "inverse")
+        m5.metric("Years to Payback", f"{_ry_res.years_to_payback:.0f} yrs" if _ry_res.years_to_payback < 999 else "∞")
+
+        # ── Verdict ──────────────────────────────────────────────────────────
+        if _ry_res.net_yield_pct >= 4.0:
+            st.success(_ry_res.verdict)
+        elif _ry_res.net_yield_pct >= 2.5:
+            st.warning(_ry_res.verdict)
+        else:
+            st.error(_ry_res.verdict)
+
+        st.divider()
+
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.subheader("📊 Monthly Cashflow Breakdown")
+            import pandas as _pd
+            _cf_data = {
+                "Item": ["Rental Income", "Mortgage Instalment", "Running Expenses", "Net Cashflow"],
+                "SGD/month": [
+                    f"+ {_ry_res.monthly_rent_income:,}",
+                    f"- {_ry_res.monthly_mortgage:,}" if _ry_res.monthly_mortgage else "—",
+                    f"- {_ry_res.monthly_expenses:,}",
+                    f"{_ry_res.monthly_net_cashflow:+,}",
+                ]
+            }
+            st.dataframe(_pd.DataFrame(_cf_data), use_container_width=True, hide_index=True)
+
+            st.subheader("📋 Annual Expense Breakdown")
+            _exp_rows = [{"Cost Item": k, "SGD/year": f"{v:,}"} for k, v in _ry_res.annual_expenses.items()]
+            _exp_rows.append({"Cost Item": "**TOTAL EXPENSES**", "SGD/year": f"**{sum(_ry_res.annual_expenses.values()):,}**"})
+            st.dataframe(_pd.DataFrame(_exp_rows), use_container_width=True, hide_index=True)
+
+        with col_b:
+            st.subheader("⚖️ Breakeven Analysis")
+            _be_delta = _ry_res.monthly_rent - _ry_res.breakeven_rent
+            st.metric("Breakeven Rent",  f"SGD {_ry_res.breakeven_rent:,}/month")
+            st.metric("Your Rent",       f"SGD {_ry_res.monthly_rent:,}/month",
+                      delta=f"SGD {_be_delta:+,.0f} {'buffer' if _be_delta >= 0 else 'shortfall'}",
+                      delta_color="normal" if _be_delta >= 0 else "inverse")
+            if _ry_res.is_mortgaged:
+                st.metric("Mortgage Coverage", f"{_ry_res.mortgage_coverage_ratio:.1f}×",
+                          delta="Healthy ✅" if _ry_res.mortgage_coverage_ratio >= 1.3 else "Tight ⚠️",
+                          delta_color="normal" if _ry_res.mortgage_coverage_ratio >= 1.3 else "inverse")
+
+            st.subheader("📈 vs Alternative Investments")
+            st.caption(f"What if you invested SGD {_ry_res.purchase_price:,} elsewhere?")
+            _bench_df = _pd.DataFrame(_ry_res.benchmarks)
+            _bench_df["Better than property?"] = _bench_df["vs Your Net Yield"].apply(
+                lambda x: "✅ Yes" if x < 0 else "❌ No"
+            )
+            st.dataframe(_bench_df, use_container_width=True, hide_index=True)
+
+        st.divider()
+        st.subheader("💡 Key Insights")
+        for tip in _ry_res.tips:
+            st.markdown(f"- {tip}")
+
+        # ── Insurance CTA ────────────────────────────────────────────────────
+        st.divider()
+        with st.expander("🛡️ Protect Your Rental Investment — Insurance Checklist"):
+            st.markdown(f"""
+As a landlord, you need more than just fire insurance. Here's what PropOS recommends:
+
+| Cover | Why | Est. Premium |
+|---|---|---|
+| **Fire Insurance** | Covers structure damage (mandatory for HDB) | SGD 200/year |
+| **Home Contents** | Protects fixtures and fittings you provide | SGD 300–600/year |
+| **Landlord Liability** | If tenant is injured in your property | Bundled with above |
+| **Loss of Rent** | Pays if property is uninhabitable due to covered event | Add-on ~SGD 100/year |
+| **Mortgage Protection (MRTA)** | Clears SGD {_ry_res.monthly_mortgage * _ry_ltenure * 12:,.0f} loan if you pass away | SGD 2,000–5,000 one-time |
+
+**Your mortgage at SGD {_ry_res.monthly_mortgage:,}/month over {int(_ry_ltenure) if _ry_ltenure else 25} years = SGD {int(_ry_res.monthly_mortgage * (int(_ry_ltenure) if _ry_ltenure else 25) * 12):,} total exposure.**
+An MRTA policy ensures your family inherits the property debt-free — not the mortgage.
+            """)
+            _ins_name  = st.text_input("Name", key="ry_ins_name")
+            _ins_email = st.text_input("Email", key="ry_ins_email")
+            if st.button("Get Free Insurance Quote", type="primary", key="ry_ins_cta"):
+                if _ins_email:
+                    try:
+                        from data.analytics import log_broker_lead as _lbl
+                        _lbl(_ins_name, _ins_email, "", _ry_loan, "landlord_insurance", "asap",
+                             f"Rental property SGD {_ry_price:,}, rent SGD {_ry_rent:,}/mo, "
+                             f"net yield {_ry_res.net_yield_pct}%")
+                    except Exception:
+                        pass
+                    st.success("✅ An insurance specialist will contact you within 1 business day with landlord cover options!")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
