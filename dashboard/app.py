@@ -4049,13 +4049,127 @@ elif tab_select == "🏛️ Property Tax":
     from agents.property_tax import analyse as _ptax_analyse, INVESTMENT_RATES as _PTAX_RATES
     from datetime import date as _ddate
 
+    # ── AV input: postal-code lookup OR manual entry ──────────────────────────
+    _ptax_input_tab1, _ptax_input_tab2 = st.tabs(["📮 Lookup by Postal Code", "✏️ Enter AV Manually"])
+
+    # Initialise AV in session state so both tabs can share it
+    if "ptax_av_val" not in st.session_state:
+        st.session_state["ptax_av_val"] = 24_000
+
+    with _ptax_input_tab1:
+        st.caption("Enter your postal code to estimate your property's Annual Value from recent rental transactions.")
+        _ptax_pc_col1, _ptax_pc_col2 = st.columns([2, 1])
+        with _ptax_pc_col1:
+            _ptax_postal = st.text_input("Singapore Postal Code", placeholder="e.g. 560123", max_chars=6, key="ptax_postal")
+        with _ptax_pc_col2:
+            _ptax_flat_type = st.selectbox("Flat / Unit Type", ["4 ROOM", "3 ROOM", "5 ROOM", "EXECUTIVE", "2 ROOM", "Private"], key="ptax_flat_type")
+
+        if st.button("🔍 Look Up AV", key="ptax_lookup"):
+            if len(_ptax_postal) == 6 and _ptax_postal.isdigit():
+                with st.spinner("Looking up address and estimating AV..."):
+                    try:
+                        import requests as _rq
+                        # Step 1: geocode via OneMap
+                        _om = _rq.get(
+                            f"https://www.onemap.gov.sg/api/common/elastic/search"
+                            f"?searchVal={_ptax_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                            timeout=5
+                        ).json()
+                        _om_results = _om.get("results", [])
+                        if not _om_results:
+                            st.error("Postal code not found. Please check and try again.")
+                        else:
+                            _om_r = _om_results[0]
+                            _om_addr = f"{_om_r.get('BLK_NO','')} {_om_r.get('ROAD_NAME','')}, Singapore {_ptax_postal}".strip()
+                            _om_building = _om_r.get("BUILDING", "") or _om_r.get("SEARCHVAL", "")
+
+                            st.success(f"📍 **{_om_addr}**" + (f" ({_om_building})" if _om_building else ""))
+
+                            # Step 2: estimate AV from HDB rental data or URA transactions
+                            # AV ≈ estimated annual rental value
+                            # HDB: use known average monthly rents by flat type
+                            # Private: use URA PSF × floor area × ~4.5% yield
+                            _AV_HDB_EST = {
+                                "2 ROOM":    10_800,   # ~$900/mo
+                                "3 ROOM":    15_600,   # ~$1,300/mo
+                                "4 ROOM":    21_600,   # ~$1,800/mo
+                                "5 ROOM":    27_600,   # ~$2,300/mo
+                                "EXECUTIVE": 33_600,   # ~$2,800/mo
+                                "Private":   36_000,   # ~$3,000/mo — rough mid-market estimate
+                            }
+                            # Adjust by postal sector (rough zone premium)
+                            _sector = int(_ptax_postal[:2])
+                            _zone_mult = 1.0
+                            if _sector in range(1, 9):    _zone_mult = 1.8   # CBD/Marina
+                            elif _sector in range(9, 12): _zone_mult = 1.5   # Orchard/River Valley
+                            elif _sector in range(15,17): _zone_mult = 1.3   # East Coast/Katong
+                            elif _sector in range(10,12): _zone_mult = 1.4   # Bukit Timah
+                            elif _sector in range(22,24): _zone_mult = 0.9   # Jurong/West
+                            elif _sector in range(70,74): _zone_mult = 0.85  # Woodlands/Yishun
+                            elif _sector in range(76,82): _zone_mult = 0.85  # Tampines/Pasir Ris
+                            elif _sector >= 60 and _sector < 70: _zone_mult = 0.90  # North
+
+                            _base_av = _AV_HDB_EST.get(_ptax_flat_type, 21_600)
+                            _est_av  = int(round(_base_av * _zone_mult / 1_000) * 1_000)
+
+                            # Try to refine from URA/HDB cache
+                            try:
+                                from data.ura_pipeline import load_all_transactions as _lut
+                                _txns = _lut()
+                                _proj_psfs = []
+                                for _t in _txns:
+                                    _tpost = str(_t.get("postalCode","") or _t.get("postal","") or "")
+                                    if _tpost == _ptax_postal:
+                                        _psf = _t.get("unitPrice") or _t.get("psf")
+                                        _area = _t.get("area") or _t.get("floorArea")
+                                        if _psf and _area:
+                                            try:
+                                                # AV ≈ PSF × sqft × 4.5% annual yield
+                                                _proj_psfs.append(float(_psf) * float(_area) * 0.045)
+                                            except Exception:
+                                                pass
+                                if _proj_psfs:
+                                    import statistics as _stat
+                                    _ura_av = int(round(_stat.median(_proj_psfs) / 1_000) * 1_000)
+                                    _est_av = _ura_av
+                                    st.caption(f"📊 AV estimated from {len(_proj_psfs)} recent URA transactions at this postal code.")
+                                else:
+                                    st.caption(f"📊 AV estimated from rental benchmarks for {_ptax_flat_type} in this area (no exact postal match in URA cache).")
+                            except Exception:
+                                st.caption(f"📊 AV estimated from rental benchmarks for {_ptax_flat_type} in this area.")
+
+                            st.info(
+                                f"**Estimated Annual Value: SGD {_est_av:,}**  \n"
+                                f"This is an *estimate* based on prevailing rental rates. "
+                                f"Your actual IRAS-assessed AV may differ. "
+                                f"Check your exact AV at [myTax Portal](https://mytax.iras.gov.sg) → "
+                                f"Property → View Property Tax."
+                            )
+                            st.session_state["ptax_av_val"] = _est_av
+
+                    except Exception as _ptax_err:
+                        st.error(f"Lookup failed: {_ptax_err}. Please enter AV manually.")
+            else:
+                st.warning("Enter a valid 6-digit Singapore postal code.")
+
+    with _ptax_input_tab2:
+        st.caption("Find your exact AV on your IRAS property tax notice or at myTax Portal → Property → View Property Tax.")
+        _ptax_av_manual = st.number_input(
+            "Annual Value (AV) of Property (SGD)",
+            help="IRAS assesses AV as the estimated annual rental value of your property.",
+            min_value=5_000, max_value=500_000,
+            value=st.session_state["ptax_av_val"],
+            step=1_000, key="ptax_av_manual"
+        )
+        st.session_state["ptax_av_val"] = _ptax_av_manual
+
+    # Use whichever AV was last set (postal lookup or manual)
+    _ptax_av = st.session_state["ptax_av_val"]
+
+    st.divider()
     col1, col2, col3 = st.columns(3)
     with col1:
-        _ptax_av = st.number_input(
-            "Annual Value (AV) of Property (SGD)",
-            help="IRAS assesses AV as the estimated annual rental value. Check your IRAS notice or myTax Portal.",
-            min_value=5_000, max_value=500_000, value=24_000, step=1_000
-        )
+        st.metric("AV to Use", f"SGD {_ptax_av:,}", help="From postal lookup or manual entry above")
     with col2:
         _ptax_oo = st.radio("Owner-Occupier Status", ["Owner-Occupied (live in it)", "Non-Owner-Occupier (renting out / investment)"], horizontal=False)
         _ptax_oo_bool = "Owner-Occupied" in _ptax_oo
