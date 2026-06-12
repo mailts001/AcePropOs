@@ -93,11 +93,15 @@ def _msg_hdb(town=None, flat_type=None) -> str:
             )
         lines = [f"🏠 *HDB Below-Market Deals*" + (f" — {town}" if town else "") + "\n"]
         for i, d in enumerate(deals[:3], 1):
+            psf        = d.get("psf_sgd", d.get("psf", 0))
+            median_psf = d.get("median_psf", 0)
+            price      = d.get("resale_price", 0)
+            area_sqm   = d.get("floor_area_sqm", d.get("floor_area_sqft", 0) / 10.764)
             lines.append(
                 f"*{i}. {d['town']} {d['flat_type']}*\n"
-                f"  📍 {d['block']} {d['street_name']}, {d.get('storey_range','')}\n"
-                f"  💰 SGD {d['resale_price']:,.0f} — {d['discount_pct']:.1f}% below median\n"
-                f"  📐 {d['floor_area_sqm']:.0f} sqm | PSF {d['psf']:,.0f} vs {d['median_psf']:,.0f}\n"
+                f"  📍 {d.get('block','')} {d.get('street_name','')}, {d.get('storey_range','')}\n"
+                f"  💰 SGD {price:,.0f} — {d['discount_pct']:.1f}% below median\n"
+                f"  📐 {area_sqm:.0f} sqm | PSF {psf:,.0f} vs {median_psf:,.0f}\n"
             )
         lines.append(f"🔓 [Set price alerts →]({DASHBOARD_URL})")
         return "\n".join(lines)
@@ -495,15 +499,24 @@ async def button_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ── Quick actions ─────────────────────────────────────────────────────────
     if data == "quick_deals":
-        await ctx.bot.send_message(chat, "🔍 Scanning transactions… (10–20s)")
-        await ctx.bot.send_message(chat, _msg_deals(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        try:
+            await ctx.bot.send_message(chat, "🔍 Scanning transactions… (10–20s)")
+            await ctx.bot.send_message(chat, _msg_deals(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        except Exception as e:
+            await ctx.bot.send_message(chat, f"Error: {e}")
 
     elif data == "quick_news":
-        await ctx.bot.send_message(chat, _msg_news(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        try:
+            await ctx.bot.send_message(chat, _msg_news(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        except Exception as e:
+            await ctx.bot.send_message(chat, f"Error fetching news: {e}")
 
     elif data == "quick_hdb":
-        await ctx.bot.send_message(chat, "🔍 Scanning HDB resale transactions…")
-        await ctx.bot.send_message(chat, _msg_hdb(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        try:
+            await ctx.bot.send_message(chat, "🔍 Scanning HDB resale transactions…")
+            await ctx.bot.send_message(chat, _msg_hdb(), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        except Exception as e:
+            await ctx.bot.send_message(chat, f"Error: {e}")
 
     elif data == "quick_value_help":
         await ctx.bot.send_message(chat,
@@ -540,11 +553,22 @@ async def button_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "subscribe_prompt":
-        await ctx.bot.send_message(chat,
-            "📬 Reply with your *email address* to subscribe to the PropOS Weekly Digest:",
-            parse_mode=ParseMode.MARKDOWN)
-        # Store in context so next free-text triggers save
-        ctx.user_data["awaiting_email"] = True
+        try:
+            await ctx.bot.send_message(
+                chat,
+                "📬 *Subscribe to PropOS Weekly Digest*\n\n"
+                "You'll get every Sunday:\n"
+                "• 🔥 Top deals below district median\n"
+                "• 📅 MOP cliffs this month\n"
+                "• 📈 Biggest PSF movers\n"
+                "• 📊 Market pulse\n\n"
+                "Please *reply with your email address* now:",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            ctx.user_data["awaiting_email"] = True
+        except Exception as e:
+            log.error(f"subscribe_prompt error: {e}")
+            await ctx.bot.send_message(chat, f"Error: {e}")
 
     # ── Admin callbacks ────────────────────────────────────────────────────────
     elif data.startswith("admin_"):
