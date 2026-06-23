@@ -935,13 +935,85 @@ elif tab_select == "🔍 Valuation":
         from data.hdb_pipeline import fetch_hdb_resale
         records = fetch_hdb_resale()
         towns_available = sorted(set(r['town'] for r in records))
-        col1, col2 = st.columns(2)
-        with col1:
-            town = st.selectbox("Town", towns_available, index=towns_available.index("TAMPINES") if "TAMPINES" in towns_available else 0)
-            flat_type = st.selectbox("Flat Type", ["3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE"])
-        with col2:
-            area_sqft = st.number_input("Floor Area (sqft)", 500, 2000, 1000)
-            asking_price = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000)
+
+        # ── Input method: postal code OR town picker ──────────────────────────
+        _val_input_method = st.radio("Enter by", ["🏘️ Town / Flat Type", "📮 Postal Code"], horizontal=True, key="val_hdb_input_method")
+
+        if _val_input_method == "📮 Postal Code":
+            _val_postal = st.text_input("Postal Code (6 digits)", max_chars=6, placeholder="e.g. 520123", key="val_postal_code")
+            col1, col2 = st.columns(2)
+            with col1:
+                flat_type = st.selectbox("Flat Type", ["4 ROOM", "3 ROOM", "5 ROOM", "EXECUTIVE"], key="val_ft_postal")
+            with col2:
+                area_sqft = st.number_input("Floor Area (sqft)", 500, 2000, 1000, key="val_area_postal")
+
+            # Resolve postal → town via OneMap
+            _val_postal_town = None
+            if _val_postal and len(_val_postal) == 6 and _val_postal.isdigit():
+                try:
+                    _om_val = requests.get(
+                        "https://www.onemap.gov.sg/api/common/elastic/search"
+                        f"?searchVal={_val_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                        timeout=6
+                    ).json()
+                    _om_val_r = (_om_val.get("results") or [{}])[0]
+                    _om_val_road = (_om_val_r.get("ROAD_NAME","") or "").strip()
+                    _om_val_blk  = (_om_val_r.get("BLK_NO","") or "").strip()
+                    _om_val_bldg = (_om_val_r.get("BUILDING","") or "").strip()
+                    # Match against HDB records by block+street
+                    _val_addr_matches = [
+                        r for r in records
+                        if _om_val_blk.lower() == r.get("block","").lower()
+                        and _om_val_road.lower() in r.get("street_name","").lower()
+                    ]
+                    if _val_addr_matches:
+                        _val_postal_town = _val_addr_matches[0]["town"]
+                        st.success(f"📍 Found: **{_om_val_blk} {_om_val_road}** → Town: **{_val_postal_town}**" +
+                                   (f" | {_om_val_bldg}" if _om_val_bldg and _om_val_bldg.upper() != "NIL" else ""))
+                    else:
+                        # Fall back to postal sector → infer district → known town mapping
+                        _sector = int(_val_postal[:2])
+                        _SECTOR_TOWN = {
+                            1:"CENTRAL AREA",2:"CENTRAL AREA",3:"CENTRAL AREA",4:"CENTRAL AREA",
+                            5:"CLEMENTI",6:"CENTRAL AREA",7:"CENTRAL AREA",8:"CENTRAL AREA",
+                            9:"CENTRAL AREA",10:"CENTRAL AREA",11:"TOA PAYOH",12:"TOAPAYOH",
+                            13:"GEYLANG",14:"GEYLANG",15:"MARINE PARADE",16:"BEDOK",
+                            17:"PASIR RIS",18:"TAMPINES",19:"SERANGOON",20:"ANG MO KIO",
+                            21:"BUKIT PANJANG",22:"JURONG WEST",23:"BUKIT BATOK",24:"CHOA CHU KANG",
+                            25:"WOODLANDS",26:"YISHUN",27:"SEMBAWANG",28:"HOUGANG",
+                            29:"HOUGANG",30:"SENGKANG",31:"PUNGGOL",32:"SENGKANG",
+                            33:"PUNGGOL",34:"PUNGGOL",35:"BISHAN",36:"BISHAN",
+                            37:"BISHAN",38:"KALLANG/WHAMPOA",39:"KALLANG/WHAMPOA",
+                            40:"MARINE PARADE",41:"MARINE PARADE",42:"TAMPINES",
+                            43:"BEDOK",44:"BEDOK",45:"PASIR RIS",46:"PASIR RIS",
+                            47:"TAMPINES",48:"TAMPINES",49:"JURONG EAST",50:"JURONG WEST",
+                            51:"JURONG WEST",52:"JURONG EAST",53:"JURONG WEST",54:"JURONG WEST",
+                            55:"BUKIT MERAH",56:"QUEENSTOWN",57:"QUEENSTOWN",58:"QUEENSTOWN",
+                            59:"QUEENSTOWN",60:"TOA PAYOH",61:"TOA PAYOH",62:"TOA PAYOH",
+                            63:"TOA PAYOH",64:"TOA PAYOH",65:"HOUGANG",66:"HOUGANG",
+                            67:"HOUGANG",68:"SENGKANG",69:"ANG MO KIO",70:"ANG MO KIO",
+                            71:"ANG MO KIO",72:"BISHAN",73:"BISHAN",75:"BUKIT PANJANG",
+                            76:"BUKIT PANJANG",77:"WOODLANDS",78:"WOODLANDS",79:"WOODLANDS",
+                            80:"WOODLANDS",81:"SEMBAWANG",82:"YISHUN",
+                        }
+                        _val_postal_town = _SECTOR_TOWN.get(_sector)
+                        if _val_postal_town:
+                            st.info(f"📍 Postal sector {_sector:02d} → estimated town: **{_val_postal_town}** (no exact block match found)")
+                        else:
+                            st.warning("Could not determine town from this postal code. Please use Town picker instead.")
+                except Exception as _ve:
+                    st.warning(f"Postal lookup error: {_ve}. Use Town picker instead.")
+
+            town = _val_postal_town or (towns_available[0] if towns_available else "TAMPINES")
+            asking_price = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000, key="val_ask_postal")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                town = st.selectbox("Town", towns_available, index=towns_available.index("TAMPINES") if "TAMPINES" in towns_available else 0)
+                flat_type = st.selectbox("Flat Type", ["3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE"])
+            with col2:
+                area_sqft = st.number_input("Floor Area (sqft)", 500, 2000, 1000)
+                asking_price = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000)
 
         if st.button("Value HDB", type="primary", key="val_hdb"):
             agent = ValuationAgent()
@@ -1053,6 +1125,39 @@ elif tab_select == "🔍 Valuation":
                                f"Current implied yield: **{impl_yields[-1]:.2f}%** gross / **{round(impl_yields[-1]-1.2, 2):.2f}%** net.")
                 else:
                     st.info("No rental benchmark for this town/flat type.")
+
+        # ── Recent Matching Transactions ──────────────────────────────────────
+        st.divider()
+        st.subheader(f"🧾 Recent Transactions — {town} {flat_type}")
+        _recent_recs = sorted(
+            [r for r in records
+             if r.get("town","").upper() == town.upper()
+             and _ft_key.lower() in r.get("flat_type","").lower()
+             and r.get("resale_price", 0) > 0],
+            key=lambda r: r.get("month",""),
+            reverse=True
+        )[:25]
+
+        if _recent_recs:
+            import pandas as _pd_rec
+            _rec_rows = []
+            for r in _recent_recs:
+                _rec_rows.append({
+                    "Month":        r.get("month",""),
+                    "Block":        r.get("block",""),
+                    "Street":       r.get("street_name",""),
+                    "Type":         r.get("flat_type",""),
+                    "Storey":       r.get("storey_range",""),
+                    "Area (sqft)":  int(r.get("floor_area_sqft", 0)),
+                    "Price (SGD)":  f"${r.get('resale_price',0):,.0f}",
+                    "PSF":          f"${r.get('psf_sgd',0):,.0f}",
+                    "Lease Rem.":   r.get("remaining_lease",""),
+                })
+            st.dataframe(_pd_rec.DataFrame(_rec_rows), hide_index=True, use_container_width=True)
+            st.caption(f"Showing {len(_recent_recs)} most recent {flat_type} resale transactions in {town}. "
+                       f"Sorted by transaction date descending.")
+        else:
+            st.info(f"No recent transactions found for {flat_type} in {town}. Try a different flat type or town.")
 
     elif val_type == "🏢 Private Condo/Apt":
         from data.ura_pipeline import get_district_stats
@@ -4365,11 +4470,13 @@ elif tab_select == "📈 Price History":
     with _ph_tab1:
         col1, col2 = st.columns([3, 1])
         with col1:
-            _ph_project = st.text_input("Project / Development Name", placeholder="e.g. The Pinnacle @ Duxton, Jurong East St 32",
+            _ph_project = st.text_input("Project / Development Name or Postal Code",
+                                         placeholder="e.g. The Pinnacle @ Duxton  OR  6-digit postal code",
                                          key="ph_project_name")
         with col2:
             _ph_proptype = st.selectbox("Filter by Type", ["All", "Condominium", "Apartment", "Executive Condominium", "Landed"],
                                          key="ph_proptype")
+        st.caption("💡 Tip: enter a project name (partial is fine) or a 6-digit postal code — we'll resolve it to the development name automatically.")
 
         if st.button("Load Price History", type="primary", key="ph_search") and _ph_project:
             with st.spinner("Loading transaction history from URA cache..."):
@@ -4377,7 +4484,38 @@ elif tab_select == "📈 Price History":
                     from data.ura_pipeline import load_all_transactions as _load_ura
                     _all_txns = _load_ura()
                     _ph_ptype = None if _ph_proptype == "All" else _ph_proptype
-                    _ph_res = _ph_get(_ph_project, _all_txns, _ph_ptype)
+
+                    # ── Postal code → building name via OneMap ───────────────
+                    _ph_search_term = _ph_project.strip()
+                    _ph_search_term_orig = _ph_search_term
+                    if _ph_search_term.isdigit() and len(_ph_search_term) == 6:
+                        try:
+                            _om = requests.get(
+                                "https://www.onemap.gov.sg/api/common/elastic/search"
+                                f"?searchVal={_ph_search_term}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                                timeout=6
+                            ).json()
+                            _om_results = _om.get("results", [])
+                            if _om_results:
+                                _om_r = _om_results[0]
+                                _bldg = (_om_r.get("BUILDING","") or "").strip()
+                                _road = (_om_r.get("ROAD_NAME","") or "").strip()
+                                _blk  = (_om_r.get("BLK_NO","") or "").strip()
+                                # Use building name if available, else block+street
+                                _ph_search_term = _bldg if _bldg and _bldg.upper() not in ("NIL","") else f"{_blk} {_road}".strip()
+                                st.info(f"📍 Postal {_ph_search_term_orig} → searching for: **{_ph_search_term}**")
+                            else:
+                                st.warning(f"Postal code {_ph_search_term_orig} not found on OneMap. Searching as-is.")
+                        except Exception as _om_err:
+                            st.caption(f"OneMap lookup failed: {_om_err}. Searching postal code as-is.")
+
+                    _ph_res = _ph_get(_ph_search_term, _all_txns, _ph_ptype)
+                    # Store original query for display
+                    if _ph_res and _ph_res["match_count"] == 0 and _ph_search_term != _ph_search_term_orig:
+                        # Fallback: try original postal as literal search
+                        _ph_res_fallback = _ph_get(_ph_search_term_orig, _all_txns, _ph_ptype)
+                        if _ph_res_fallback and _ph_res_fallback["match_count"] > 0:
+                            _ph_res = _ph_res_fallback
                 except Exception as _phe:
                     st.error(f"Error loading data: {_phe}")
                     _ph_res = None
