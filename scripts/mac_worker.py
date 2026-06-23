@@ -43,11 +43,13 @@ LOCAL_WORK_DIR.mkdir(parents=True, exist_ok=True)
 WORKER_HOST = subprocess.getoutput("hostname")
 
 
-def _ssh(cmd: str) -> tuple[str, int]:
+def _ssh(cmd: str, debug: bool = False) -> tuple[str, int]:
     """Run command on VPS via SSH. Returns (stdout, returncode)."""
     ssh_cmd = ["ssh", "-i", VPS_KEY, "-o", "StrictHostKeyChecking=no",
                "-o", "ConnectTimeout=10", VPS_HOST, cmd]
     result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+    if debug or (result.returncode != 0 and result.stderr):
+        print(f"[SSH] rc={result.returncode} stderr={result.stderr.strip()[:200]}")
     return result.stdout.strip(), result.returncode
 
 
@@ -82,8 +84,17 @@ def _tg(text: str):
 
 def heartbeat():
     """Write a heartbeat file to VPS so the dashboard knows worker is online."""
-    hb = json.dumps({"host": WORKER_HOST, "ts": time.time(), "status": "idle"})
-    out, rc = _ssh(f"echo '{hb}' > {VPS_PATH}/cache/marketing/worker_heartbeat.json")
+    # Avoid shell quoting issues with JSON — write via Python on the remote side
+    ts   = int(time.time())
+    host = WORKER_HOST.replace("'", "").replace('"', "")
+    cmd  = (
+        f"python3 -c \""
+        f"import json; "
+        f"open('{VPS_PATH}/cache/marketing/worker_heartbeat.json','w')"
+        f".write(json.dumps({{'host':'{host}','ts':{ts},'status':'idle'}}))"
+        f"\""
+    )
+    out, rc = _ssh(cmd)
     return rc == 0
 
 
