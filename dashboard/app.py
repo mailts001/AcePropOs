@@ -218,13 +218,15 @@ def _cached_districts_with_data():
     return result
 
 def _show_rental_intel(district: int, est_val_sgd: int = 0):
-    """Render URA rental market stats for a given district. Call from session-state-gated blocks only."""
+    """
+    Render URA rental market stats from cache only — never blocks render thread.
+    Cache is seeded by sync_ura.py (daily cron). Call from session-state-gated blocks.
+    """
     st.divider()
     st.subheader(f"🏘️ Rental Market — District {district}")
     try:
         from data.ura_rental_pipeline import get_district_rental_stats
-        with st.spinner("Loading rental data..."):
-            _rs = get_district_rental_stats(district)
+        _rs = get_district_rental_stats(district)  # cache-only, instant
         if _rs.get("status") == "ok":
             st.caption(f"URA median rental data · {_rs.get('latest_quarter','latest available')}")
             _bd = _rs.get("by_bedrooms", {})
@@ -232,27 +234,28 @@ def _show_rental_intel(district: int, est_val_sgd: int = 0):
                 import pandas as _rrpd
                 _rrows = []
                 for _beds, _info in sorted(_bd.items()):
-                    _label  = f"{_beds} BR" if str(_beds) not in ("NA","") else "Studio/NA"
-                    _med    = _info.get("median_rent_sgd") or 0
-                    _p25    = _info.get("p25_rent_sgd") or 0
-                    _p75    = _info.get("p75_rent_sgd") or 0
-                    _gy     = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
+                    _label = f"{_beds} BR" if str(_beds) not in ("NA","") else "Studio/NA"
+                    _med   = _info.get("median_rent_sgd") or 0
+                    _p25   = _info.get("p25_rent_sgd") or 0
+                    _p75   = _info.get("p75_rent_sgd") or 0
+                    _gy    = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
                     _rrows.append({
-                        "Bedrooms":      _label,
-                        "Median Rent/mo":f"${_med:,.0f}" if _med else "—",
+                        "Bedrooms":        _label,
+                        "Median Rent/mo":  f"${_med:,.0f}" if _med else "—",
                         "Range (P25–P75)": f"${_p25:,.0f} – ${_p75:,.0f}" if _p25 else "—",
                         "Est. Gross Yield": f"{_gy:.2f}%" if _gy else "—",
                     })
                 st.dataframe(_rrpd.DataFrame(_rrows), hide_index=True, use_container_width=True)
-                st.caption("Yield based on your estimated/asking value. Actual yield depends on unit size, floor and furnishing.")
+                st.caption("Yield based on estimated/asking value. Actual yield depends on unit size, floor and furnishing.")
             else:
-                st.info("No rental breakdown by bedroom type available for this district.")
+                st.info("No rental breakdown by bedroom type for this district in current cache.")
         else:
-            import os as _os
-            if _os.environ.get("URA_ACCESS_KEY"):
-                st.info("⏳ Fetching rental data for the first time — this takes ~10 seconds and will be cached for 7 days.")
-            else:
-                st.info("💡 **One-time setup:** Run this on the VPS to unlock rental data (caches for 7 days, auto-refreshes weekly):\n```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```\nAfter the first run, rental data loads automatically with no manual steps.")
+            # Cache empty — cron hasn't run yet or sync_ura.py not run manually
+            st.info(
+                "📋 **Rental data not yet cached.** Run once on the VPS to populate "
+                "(then refreshes automatically every day):\n"
+                "```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```"
+            )
     except Exception as _rle:
         st.caption(f"Rental data unavailable: {_rle}")
 
@@ -1729,6 +1732,10 @@ elif tab_select == "🔍 Valuation":
     else:  # Heatmap
         heatmap_type = st.radio("Heatmap type", ["🏠 HDB — All Towns", "🏢 Private — All Districts"], horizontal=True)
 
+        # Clear heatmap chart state when leaving heatmap tab entirely
+        if val_type != "📊 Market Heatmap":
+            st.session_state.pop("val_heatmap_loaded", None)
+
         if heatmap_type == "🏢 Private — All Districts":
             st.subheader("🗺️ Private Property Intelligence — All Districts")
             from data.ura_pipeline import get_district_stats
@@ -1770,13 +1777,15 @@ elif tab_select == "🔍 Valuation":
 
             if not hm_priv_data:
                 st.info("No private transaction data cached yet. Run `sync_ura.py` on the VPS.")
+                st.session_state["val_heatmap_loaded"] = False
             else:
+                st.session_state["val_heatmap_loaded"] = True
                 df_priv = pd.DataFrame(hm_priv_data)
                 ph_tab1, ph_tab2, ph_tab3 = st.tabs(["💰 PSF by District", "📈 Yield & Rent", "📊 Full Table"])
                 with ph_tab1:
                     st.caption("Median PSF across all private residential transactions. Sorted highest to lowest.")
                     _psf_col = df_priv.set_index("District")["Median PSF"]
-                    if _psf_col.max() > 0:
+                    if st.session_state.get("val_heatmap_loaded") and _psf_col.max() > 0:
                         st.bar_chart(_psf_col)
                     else:
                         st.info("PSF data not yet loaded — run `sync_ura.py` on the VPS to sync transactions.")

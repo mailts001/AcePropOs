@@ -81,12 +81,17 @@ def fetch_rental_transactions(batch: int = 1, force: bool = False) -> list[dict]
 def fetch_rental_medians(force: bool = False) -> list[dict]:
     """
     URA quarterly median rental by district + property type + bedroom count.
-    Very useful for yield benchmarking without needing individual transactions.
+    IMPORTANT: Only makes live API call when force=True (called by sync_ura.py).
+    In render paths, always reads from cache only — never blocks the UI thread.
     """
-    if not force and RENTAL_MEDIAN_CACHE.exists():
+    if RENTAL_MEDIAN_CACHE.exists():
         age = time.time() - RENTAL_MEDIAN_CACHE.stat().st_mtime
         if age < 86400 * 7:  # 1-week cache (quarterly data)
             return json.loads(RENTAL_MEDIAN_CACHE.read_text())
+
+    # Cache missing or expired — only fetch live if explicitly forced (sync script)
+    if not force:
+        return []   # caller handles empty gracefully; don't block render thread
 
     token = get_daily_token()
     resp = requests.get(
@@ -118,12 +123,12 @@ def fetch_rental_medians(force: bool = False) -> list[dict]:
 
 def get_district_rental_stats(district: int | str) -> dict:
     """
-    Summarise rental market for a district: median by bedroom count,
-    estimated gross yield range (requires private transaction prices).
-    Auto-fetches from URA API if cache is missing and URA_ACCESS_KEY is set.
+    Summarise rental market for a district from cache only.
+    Never makes a live API call — safe to call from Streamlit render paths.
+    Cache is populated by sync_ura.py (runs daily via cron).
     """
     try:
-        medians = fetch_rental_medians()  # uses 7-day cache; fetches if key set
+        medians = fetch_rental_medians(force=False)  # cache-only, never blocks
     except Exception:
         medians = []
     district = str(district).zfill(2)
