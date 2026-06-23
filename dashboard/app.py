@@ -5516,8 +5516,12 @@ elif tab_select == "🎨 Marketing Studio":
                 ):
                     _mj_c1, _mj_c2 = st.columns(2)
                     with _mj_c1:
-                        if Path(_mj.get("image_path","")).exists():
-                            st.image(_mj["image_path"], caption="Original", use_container_width=True)
+                        try:
+                            _mj_img = Path(_mj.get("image_path",""))
+                            if _mj_img.exists():
+                                st.image(str(_mj_img), caption="Original", use_container_width=True)
+                        except Exception:
+                            st.caption("Preview unavailable")
                     with _mj_c2:
                         st.write(f"**Status:** {_mj_status}")
                         st.write(f"**Created:** {time.strftime('%d %b %H:%M', time.localtime(_mj.get('created_at',0)))}")
@@ -5551,24 +5555,47 @@ elif tab_select == "🎨 Marketing Studio":
         if not _done_jobs:
             st.info("No completed jobs yet. Completed packs appear here automatically.")
         else:
-            for _dj in _done_jobs:
-                _dj_id    = _dj["job_id"]
-                _dj_files = get_result_files(_dj)
-                with st.expander(
-                    f"🎉 `{_dj_id}` — {_dj.get('user_label','')} "
-                    f"({len(_dj_files)} files · {_dj.get('property_type','')} {_dj.get('style','')})",
-                    expanded=True
-                ):
-                    # Preview enhanced image
-                    _enhanced = next((f for f in _dj_files if "enhanced" in f.name), None)
-                    _original = Path(_dj.get("image_path",""))
-                    _prev_col1, _prev_col2 = st.columns(2)
-                    if _original.exists():
-                        _prev_col1.image(str(_original), caption="Original",    use_container_width=True)
-                    if _enhanced and _enhanced.exists():
-                        _prev_col2.image(str(_enhanced), caption="AI Enhanced", use_container_width=True)
+            # ── Session-state gate: never read file bytes on page load ─────────
+            # Reading large images/videos on every render kills the WebSocket.
+            # Files are only loaded into memory when user explicitly clicks a job.
+            if "mk_open_job" not in st.session_state:
+                st.session_state["mk_open_job"] = None
 
-                    # Scene analysis card
+            for _dj in _done_jobs:
+                _dj_id = _dj["job_id"]
+                _dj_files = get_result_files(_dj)
+                _n_files  = len([f for f in _dj_files if f.suffix != ".json"])
+
+                # Summary row — click to expand
+                _col_info, _col_btn = st.columns([4, 1])
+                _col_info.write(
+                    f"🎉 **{_dj.get('user_label','')}** · `{_dj_id}` · "
+                    f"{_dj.get('property_type','')} {_dj.get('style','')} · "
+                    f"{_n_files} files"
+                )
+                if _col_btn.button("📂 Open", key=f"open_{_dj_id}", use_container_width=True):
+                    st.session_state["mk_open_job"] = (
+                        None if st.session_state["mk_open_job"] == _dj_id else _dj_id
+                    )
+
+                # Only render file contents for the selected job
+                if st.session_state.get("mk_open_job") == _dj_id:
+                    # Before/after preview — existence-guarded
+                    _enhanced = next((f for f in _dj_files if "enhanced" in f.name), None)
+                    _original = Path(_dj.get("image_path", ""))
+                    _prev_col1, _prev_col2 = st.columns(2)
+                    try:
+                        if _original.exists():
+                            _prev_col1.image(str(_original), caption="Original", use_container_width=True)
+                    except Exception:
+                        _prev_col1.caption("Original preview unavailable")
+                    try:
+                        if _enhanced and _enhanced.exists():
+                            _prev_col2.image(str(_enhanced), caption="AI Enhanced", use_container_width=True)
+                    except Exception:
+                        _prev_col2.caption("Enhanced preview unavailable")
+
+                    # Scene analysis
                     if _dj.get("scene_analysis"):
                         _sa2 = _dj["scene_analysis"]
                         st.info(
@@ -5577,54 +5604,61 @@ elif tab_select == "🎨 Marketing Studio":
                             f"**Quality uplift:** {_dj.get('estimated_quality_uplift','?')}"
                         )
 
-                    # Individual file downloads
+                    # Individual platform downloads — loaded on demand only
                     st.write("**Export files:**")
                     _dl_cols = st.columns(3)
+                    _platform_map = {
+                        "propertyguru": "PropertyGuru",
+                        "instagram_sq": "Instagram □",
+                        "instagram_st": "Instagram ↕",
+                        "facebook":     "Facebook",
+                        "whatsapp":     "WhatsApp",
+                        "print_hq":     "Print HQ",
+                        "video":        "📹 Video",
+                    }
                     for _fi, _fpath in enumerate([f for f in _dj_files if f.suffix != ".json"]):
-                        _platform_map = {
-                            "propertyguru": "PropertyGuru",
-                            "instagram_sq": "Instagram □",
-                            "instagram_st": "Instagram ↕",
-                            "facebook":     "Facebook",
-                            "whatsapp":     "WhatsApp",
-                            "print_hq":     "Print HQ",
-                            "video":        "📹 Video",
-                        }
                         _pfm = next((v for k, v in _platform_map.items() if k in _fpath.name), _fpath.stem)
                         with _dl_cols[_fi % 3]:
-                            st.download_button(
-                                label=f"⬇️ {_pfm}",
-                                data=_fpath.read_bytes(),
-                                file_name=_fpath.name,
-                                mime="video/mp4" if _fpath.suffix == ".mp4" else "image/jpeg",
-                                key=f"dl_{_dj_id}_{_fpath.name}",
-                                use_container_width=True,
-                            )
+                            try:
+                                st.download_button(
+                                    label=f"⬇️ {_pfm}",
+                                    data=_fpath.read_bytes(),
+                                    file_name=_fpath.name,
+                                    mime="video/mp4" if _fpath.suffix == ".mp4" else "image/jpeg",
+                                    key=f"dl_{_dj_id}_{_fpath.name}",
+                                    use_container_width=True,
+                                )
+                            except Exception:
+                                st.caption(f"⚠️ {_pfm} unavailable")
 
-                    # ZIP download — all files at once
+                    # ZIP — built only when this job is open
                     st.divider()
-                    _zip_buf = _io.BytesIO()
-                    with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
-                        for _f in [f for f in _dj_files if f.suffix != ".json"]:
-                            _zf.write(_f, _f.name)
-                    st.download_button(
-                        label=f"📦 Download Full Pack (ZIP — {len(_dj_files)-1} files)",
-                        data=_zip_buf.getvalue(),
-                        file_name=f"PropOS_MarketingPack_{_dj_id}.zip",
-                        mime="application/zip",
-                        key=f"zip_{_dj_id}",
-                        use_container_width=True,
-                        type="primary",
-                    )
+                    try:
+                        _zip_buf = _io.BytesIO()
+                        with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+                            for _f in [f for f in _dj_files if f.suffix != ".json"]:
+                                _zf.write(_f, _f.name)
+                        st.download_button(
+                            label=f"📦 Download Full Pack (ZIP — {_n_files} files)",
+                            data=_zip_buf.getvalue(),
+                            file_name=f"PropOS_MarketingPack_{_dj_id}.zip",
+                            mime="application/zip",
+                            key=f"zip_{_dj_id}",
+                            use_container_width=True,
+                            type="primary",
+                        )
+                    except Exception as _ze:
+                        st.error(f"ZIP error: {_ze}")
 
-                    # Captions
-                    if _dj.get("scene_analysis", {}).get("social_captions") or _dj.get("social_captions"):
-                        _caps = _dj.get("social_captions") or _dj["scene_analysis"].get("social_captions", {})
-                        if _caps:
-                            st.divider()
-                            st.write("**AI-generated captions:**")
-                            for _plat, _cap in _caps.items():
-                                st.text_area(_plat.title(), _cap, height=80, key=f"cap_{_dj_id}_{_plat}")
+                    # AI captions
+                    _caps = _dj.get("social_captions") or _dj.get("scene_analysis", {}).get("social_captions", {})
+                    if _caps:
+                        st.divider()
+                        st.write("**AI-generated captions:**")
+                        for _plat, _cap in _caps.items():
+                            st.text_area(_plat.title(), _cap, height=80, key=f"cap_{_dj_id}_{_plat}")
+
+                st.divider()
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
