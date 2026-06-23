@@ -1398,7 +1398,16 @@ elif tab_select == "🔍 Valuation":
 
     elif val_type == "🏢 Private Condo/Apt":
         from data.ura_pipeline import get_district_stats
-        # Show which districts have data
+        st.caption("Enter your project name for a property-specific valuation, or just select the district for a benchmark.")
+
+        # ── Project name (optional but preferred) ────────────────────────────
+        priv_project_input = st.text_input(
+            "Project / Development Name (recommended)",
+            placeholder="e.g. The Interlace, Parc Clematis, One Holland Village",
+            key="val_priv_proj"
+        )
+
+        # ── District + property details ──────────────────────────────────────
         districts_with_data = []
         for d in range(1, 29):
             s = get_district_stats(d)
@@ -1408,33 +1417,108 @@ elif tab_select == "🔍 Valuation":
         if not districts_with_data:
             st.info(
                 "Private transaction data not yet synced.\n\n"
-                "Run once on the VPS to unlock all 28 districts:\n"
+                "Run once on the VPS:\n"
                 "```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```"
             )
         else:
             district_options = {f"D{d} — {cnt} txns, median ${psf:,.0f} PSF": d for d, cnt, psf in districts_with_data}
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
-                selected = st.selectbox("District (with data)", list(district_options.keys()))
-                district = district_options[selected]
-                area_sqft = st.number_input("Area (sqft)", 300, 5000, 1000, key="priv_area")
+                selected    = st.selectbox("District", list(district_options.keys()))
+                district    = district_options[selected]
             with col2:
                 property_type = st.selectbox("Type", ["Condominium", "Apartment", "Executive Condominium"])
+                area_sqft     = st.number_input("Area (sqft)", 300, 5000, 1000, key="priv_area")
+            with col3:
+                priv_floor  = st.number_input("Floor / Storey", 1, 80, 10, key="priv_floor",
+                                              help="Higher floors typically command a 0.3–0.8% PSF premium per floor")
                 asking_price = st.number_input("Asking Price (SGD)", 0, 10000000, 0, step=10000, key="priv_ask2")
 
             if st.button("Value Property", type="primary", key="val_priv"):
                 agent = ValuationAgent()
-                with st.spinner("Analysing URA transactions..."):
-                    result = agent.value_private_property(district, area_sqft, property_type, asking_price, explain=bool(asking_price))
-                if result.get("status") == "ok":
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
-                    c2.metric("Median PSF", f"${result['median_psf']:,.0f}")
-                    c3.metric("PSF Range", f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
-                    if asking_price > 0:
-                        st.metric("vs District Median", f"{result.get('vs_median_pct',0):+.1f}%", delta=result.get('verdict',''))
-                    if result.get("explanation"):
-                        st.write("**AI Analysis:**", result["explanation"])
+
+                # ── Path A: Project name given → URA transaction lookup ───────
+                if priv_project_input.strip():
+                    with st.spinner(f"Searching URA transactions for '{priv_project_input}'..."):
+                        try:
+                            from agents.price_history import get_project_history as _priv_ph2
+                            _all_ura2   = _cached_ura_transactions()
+                            _proj_hist  = _priv_ph2(priv_project_input.strip(), _all_ura2)
+                        except Exception as _ue2:
+                            _proj_hist  = None
+                            st.error(f"URA lookup error: {_ue2}")
+
+                    if _proj_hist and _proj_hist.get("match_count", 0) > 0:
+                        _pq = _proj_hist.get("quarters", [])
+                        _latest_q  = _pq[-1] if _pq else {}
+                        _med_psf   = _proj_hist.get("latest_median_psf", 0)
+                        _p25_psf   = _latest_q.get("min_psf", 0)
+                        _p75_psf   = _latest_q.get("max_psf", 0)
+                        # Floor premium: +0.5% per floor above 5th
+                        _floor_adj = 1 + max(0, priv_floor - 5) * 0.005
+                        _adj_psf   = round(_med_psf * _floor_adj)
+                        _est_val   = round(_adj_psf * area_sqft)
+
+                        st.success(f"✅ Found **{_proj_hist['match_count']:,} transactions** for '{priv_project_input}'")
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Est. Value",       f"${_est_val:,.0f}",
+                                  help=f"Latest median PSF × {area_sqft:,} sqft × floor adj")
+                        c2.metric("Project Median PSF", f"${_med_psf:,.0f}")
+                        c3.metric("PSF Range (latest Q)", f"${_p25_psf:,}–${_p75_psf:,}")
+                        c4.metric("Floor-adj PSF",    f"${_adj_psf:,.0f}",
+                                  help=f"Floor {priv_floor}: +{round((_floor_adj-1)*100,1):.1f}% vs median")
+                        if asking_price > 0:
+                            _ask_psf = round(asking_price / area_sqft)
+                            _vs_proj = round((asking_price - _est_val) / _est_val * 100, 1) if _est_val else 0
+                            st.divider()
+                            va, vb, vc = st.columns(3)
+                            va.metric("Asking PSF",          f"${_ask_psf:,.0f}")
+                            vb.metric("Asking vs Project",   f"{_vs_proj:+.1f}%",
+                                      delta="Above market" if _vs_proj>5 else ("Fair" if abs(_vs_proj)<=5 else "Below market"))
+                            vc.metric("Deal Score",          f"{max(0,min(100,round(50-_vs_proj*2)))}/100",
+                                      help="100 = deeply below market")
+
+                        # PSF trend chart
+                        if _pq:
+                            import pandas as _pvpd
+                            st.divider()
+                            st.subheader(f"📈 PSF Trend — {priv_project_input.title()}")
+                            _pvdf = _pvpd.DataFrame(_pq).set_index("quarter")
+                            if not _pvdf.empty and _pvdf["median_psf"].max() > 0:
+                                st.line_chart(_pvdf["median_psf"], height=240)
+                            st.dataframe(_pvdf[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
+                                "median_psf":"Median PSF","min_psf":"Min PSF","max_psf":"Max PSF",
+                                "count":"# Txns","median_price":"Median Price (SGD)"
+                            }), use_container_width=True)
+                            st.caption(f"PSF trend for {priv_project_input.title()}. "
+                                       f"Change: **{_proj_hist['psf_change_pct']:+.1f}%** from {_pq[0]['quarter']} to {_pq[-1]['quarter']}.")
+                    else:
+                        st.warning(f"No URA transactions found for **'{priv_project_input}'** — showing district benchmark instead.")
+                        # Fall through to district benchmark below
+                        priv_project_input = ""
+
+                # ── Path B: District benchmark (no project name OR project not found) ──
+                if not priv_project_input.strip():
+                    with st.spinner("Analysing URA transactions..."):
+                        result = agent.value_private_property(district, area_sqft, property_type, asking_price, explain=bool(asking_price))
+                    if result.get("status") == "ok":
+                        # Floor premium adjustment
+                        _floor_adj2 = 1 + max(0, priv_floor - 5) * 0.005
+                        _adj_med_psf = round(result["median_psf"] * _floor_adj2)
+                        _adj_est_val = round(_adj_med_psf * area_sqft)
+                        st.info(f"📊 Showing **District {district}** benchmark — enter a project name above for property-specific valuation")
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Est. Value (floor adj)", f"${_adj_est_val:,.0f}",
+                                  help=f"Floor {priv_floor}: district median PSF × {_floor_adj2:.3f}")
+                        c2.metric("District Median PSF",    f"${result['median_psf']:,.0f}")
+                        c3.metric("Floor-adj PSF",          f"${_adj_med_psf:,.0f}")
+                        c4.metric("PSF Range (P25–P75)",    f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+                        if asking_price > 0:
+                            _ask_psf2 = round(asking_price / area_sqft)
+                            _vs_d = result.get("vs_median_pct", 0)
+                            st.metric("Asking vs District Median", f"{_vs_d:+.1f}%", delta=result.get("verdict",""))
+                        if result.get("explanation"):
+                            st.write("**AI Analysis:**", result["explanation"])
 
                     # ── Rental Intelligence for this district ──
                     st.divider()
@@ -1571,16 +1655,11 @@ elif tab_select == "🔍 Valuation":
                     )
                     st.caption("Net yield estimated after ~1.5% annual holding costs (maintenance, vacancy, property tax). Not financial advice.")
 
-        else:
-        # ── HDB Heatmap ────────────────────────────────────────────────────────
-        # (original HDB heatmap below)
-            pass
         if heatmap_type == "🏠 HDB — All Towns":
-        # ─────────────────────────────────────────────────────────────────
-        #  original HDB heatmap code (indented one level) starts here
-        # ─────────────────────────────────────────────────────────────────
             st.subheader("🗺️ HDB Market Intelligence — All Towns")
-        from data.hdb_pipeline import fetch_hdb_resale, get_town_stats
+        else:
+            st.stop()  # Private mode ends here — prevents HDB controls below from rendering
+        from data.hdb_pipeline import get_town_stats
         from collections import defaultdict, Counter
         import pandas as pd
 
