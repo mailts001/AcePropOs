@@ -131,8 +131,12 @@ def get_district_rental_stats(district: int | str) -> dict:
         medians = fetch_rental_medians(force=False)  # cache-only, never blocks
     except Exception:
         medians = []
-    district = str(district).zfill(2)
-    district_data = [m for m in medians if str(m.get("district", "")).zfill(2) == district]
+    # Normalise district for comparison — URA stores as "D15", input may be int 15 or str "15"
+    target = str(district).replace("D","").strip().lstrip("0") or "0"
+    district_data = [
+        m for m in medians
+        if str(m.get("district","")).replace("D","").strip().lstrip("0") == target
+    ]
 
     if not district_data:
         return {"district": district, "status": "no_data"}
