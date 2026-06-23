@@ -46,6 +46,10 @@ try:
 except ImportError:
     DIFFUSERS_OK = False
 
+# Set DISABLE_SD=1 to skip SD and use Pillow-only (faster, no model download)
+if os.environ.get("DISABLE_SD", "").strip() == "1":
+    DIFFUSERS_OK = False
+
 FFMPEG_OK = shutil.which("ffmpeg") is not None
 
 PLATFORM_SPECS = {
