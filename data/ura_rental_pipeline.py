@@ -84,12 +84,13 @@ def fetch_rental_medians(force: bool = False) -> list[dict]:
     IMPORTANT: Only makes live API call when force=True (called by sync_ura.py).
     In render paths, always reads from cache only — never blocks the UI thread.
     """
-    if RENTAL_MEDIAN_CACHE.exists():
+    # force=True always bypasses cache (used by sync_ura.py to refresh)
+    if not force and RENTAL_MEDIAN_CACHE.exists():
         age = time.time() - RENTAL_MEDIAN_CACHE.stat().st_mtime
         if age < 86400 * 7:  # 1-week cache (quarterly data)
             return json.loads(RENTAL_MEDIAN_CACHE.read_text())
 
-    # Cache missing or expired — only fetch live if explicitly forced (sync script)
+    # No valid cache — only fetch live if explicitly forced (sync script)
     if not force:
         return []   # caller handles empty gracefully; don't block render thread
 
