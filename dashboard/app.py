@@ -1380,6 +1380,60 @@ elif tab_select == "🔍 Valuation":
                             "Price (SGD)": f"${t.get('resale_price',0):,.0f}",
                             "PSF":         f"${t.get('psf_sgd',0):,.0f}",
                         } for t in _addr_txns]), hide_index=True, use_container_width=True)
+                    # ── Rental Benchmark (postal path) ──────────────────────────
+                    _post_town = result.get("town","").upper()
+                    _post_ft   = result.get("flat_type","4 ROOM")
+                    _pft_key   = _post_ft if _post_ft in ("3 ROOM","4 ROOM","5 ROOM","EXECUTIVE") else "4 ROOM"
+                    _post_rent_map = {
+                        "ANG MO KIO":     {"3 ROOM":2300,"4 ROOM":2800,"5 ROOM":3200,"EXECUTIVE":3500},
+                        "BEDOK":          {"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "BISHAN":         {"3 ROOM":2400,"4 ROOM":3000,"5 ROOM":3400,"EXECUTIVE":3700},
+                        "BUKIT BATOK":    {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "BUKIT MERAH":    {"3 ROOM":2600,"4 ROOM":3200,"5 ROOM":3700,"EXECUTIVE":4000},
+                        "BUKIT PANJANG":  {"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                        "BUKIT TIMAH":    {"3 ROOM":2800,"4 ROOM":3500,"5 ROOM":4000,"EXECUTIVE":4500},
+                        "CENTRAL AREA":   {"3 ROOM":3200,"4 ROOM":4200,"5 ROOM":5000,"EXECUTIVE":5500},
+                        "CHOA CHU KANG":  {"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                        "CLEMENTI":       {"3 ROOM":2400,"4 ROOM":2900,"5 ROOM":3400,"EXECUTIVE":3700},
+                        "GEYLANG":        {"3 ROOM":2200,"4 ROOM":2800,"5 ROOM":3200,"EXECUTIVE":3500},
+                        "HOUGANG":        {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "JURONG EAST":    {"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "JURONG WEST":    {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "KALLANG/WHAMPOA":{"3 ROOM":2500,"4 ROOM":3100,"5 ROOM":3600,"EXECUTIVE":3900},
+                        "MARINE PARADE":  {"3 ROOM":2600,"4 ROOM":3200,"5 ROOM":3700,"EXECUTIVE":4000},
+                        "PASIR RIS":      {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "PUNGGOL":        {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "QUEENSTOWN":     {"3 ROOM":2700,"4 ROOM":3400,"5 ROOM":3900,"EXECUTIVE":4200},
+                        "SEMBAWANG":      {"3 ROOM":1900,"4 ROOM":2400,"5 ROOM":2800,"EXECUTIVE":3100},
+                        "SENGKANG":       {"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "SERANGOON":      {"3 ROOM":2300,"4 ROOM":2900,"5 ROOM":3300,"EXECUTIVE":3600},
+                        "TAMPINES":       {"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "TOA PAYOH":      {"3 ROOM":2400,"4 ROOM":3000,"5 ROOM":3500,"EXECUTIVE":3800},
+                        "WOODLANDS":      {"3 ROOM":1900,"4 ROOM":2400,"5 ROOM":2800,"EXECUTIVE":3100},
+                        "YISHUN":         {"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                    }
+                    _post_rent_val = _post_rent_map.get(_post_town, {}).get(_pft_key, 0)
+                    _post_val      = result.get("address_median_price", 0) or result.get("latest_transacted_price", 0)
+                    st.divider()
+                    st.subheader(f"🏘️ Rental Market — {_post_town} {_post_ft}")
+                    if _post_rent_val:
+                        _pg  = round(_post_rent_val * 12 / _post_val * 100, 2) if _post_val else 0
+                        _pn  = round(_pg - 0.8, 2) if _pg else 0
+                        hpa, hpb, hpc, hpd = st.columns(4)
+                        hpa.metric("Est. Monthly Rent",  f"${_post_rent_val:,}",
+                                   help="SRX 2024–25 median for this flat type and town")
+                        hpb.metric("Rent Range",         f"${round(_post_rent_val*0.88/100)*100:,} – ${round(_post_rent_val*1.12/100)*100:,}")
+                        hpc.metric("Est. Gross Yield",   f"{_pg:.2f}%" if _pg else "—",
+                                   help="Annual rent ÷ address median price")
+                        hpd.metric("Est. Net Yield",     f"{_pn:.2f}%" if _pn else "—",
+                                   help="After ~0.8% p.a. for maintenance and vacancy")
+                        st.caption(
+                            "HDB rental: MOP (5 years) must be met before renting entire flat. "
+                            "Sub-letting requires HDB approval. Benchmark from SRX — actual rent "
+                            "varies by floor, renovation and proximity to MRT."
+                        )
+                    else:
+                        st.info(f"No rental benchmark available for {_post_town}.")
                 else:
                     st.warning(result.get("message","Address not found — try Address Lookup tab or use Town picker."))
                     if result.get("suggestions"):
@@ -1468,6 +1522,7 @@ elif tab_select == "🔍 Valuation":
                 "TOA PAYOH":      {"3 ROOM":2400,"4 ROOM":3000,"5 ROOM":3500,"EXECUTIVE":3800},
                 "WOODLANDS":      {"3 ROOM":1900,"4 ROOM":2400,"5 ROOM":2800,"EXECUTIVE":3100},
                 "YISHUN":         {"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                "BUKIT TIMAH":    {"3 ROOM":2800,"4 ROOM":3500,"5 ROOM":4000,"EXECUTIVE":4500},
             }
             from collections import defaultdict as _defdict
             import pandas as _tpd
@@ -1940,18 +1995,28 @@ elif tab_select == "🔍 Valuation":
 
             with hm_tab1:
                 st.caption(f"{hm_flat} — {_window_label}. Sorted highest to lowest PSF.")
-                st.bar_chart(df.set_index("Town")["Median PSF"])
+                _hm_psf_col = df.set_index("Town")["Median PSF"]
+                if not _hm_psf_col.empty and _hm_psf_col.max() > 0:
+                    st.bar_chart(_hm_psf_col)
+                else:
+                    st.info("No PSF data for this filter. Try 'All data' or '4 ROOM'.")
 
             with hm_tab2:
                 yield_df = df.sort_values("Gross Yield %", ascending=False)
                 rc1, rc2 = st.columns(2)
                 with rc1:
                     st.subheader("Est. Monthly Rent (SGD)")
-                    st.bar_chart(yield_df.set_index("Town")["Est Monthly Rent"])
+                    _hm_rent_col = yield_df.set_index("Town")["Est Monthly Rent"]
+                    if not _hm_rent_col.empty and _hm_rent_col.max() > 0:
+                        st.bar_chart(_hm_rent_col)
+                    else:
+                        st.info("No rental data for this filter.")
                     st.caption(f"Scaled from 4-room SRX benchmarks × {_scale:.2f} for {hm_flat}.")
                 with rc2:
                     st.subheader("Gross Rental Yield (%)")
-                    st.bar_chart(yield_df.set_index("Town")["Gross Yield %"])
+                    _hm_yield_col = yield_df.set_index("Town")["Gross Yield %"]
+                    if not _hm_yield_col.empty and _hm_yield_col.max() > 0:
+                        st.bar_chart(_hm_yield_col)
                     st.caption("Higher = better yield. Affordable towns typically yield more.")
                 st.divider()
                 st.write(f"**Top 5 yield towns ({hm_flat}):**")
