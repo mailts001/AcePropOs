@@ -218,12 +218,13 @@ def _cached_districts_with_data():
     return result
 
 def _show_rental_intel(district: int, est_val_sgd: int = 0):
-    """Render URA rental market stats for a given district. Call from inside a button handler."""
+    """Render URA rental market stats for a given district. Call from session-state-gated blocks only."""
     st.divider()
     st.subheader(f"🏘️ Rental Market — District {district}")
     try:
         from data.ura_rental_pipeline import get_district_rental_stats
-        _rs = get_district_rental_stats(district)
+        with st.spinner("Loading rental data..."):
+            _rs = get_district_rental_stats(district)
         if _rs.get("status") == "ok":
             st.caption(f"URA median rental data · {_rs.get('latest_quarter','latest available')}")
             _bd = _rs.get("by_bedrooms", {})
@@ -1243,6 +1244,18 @@ elif tab_select == "🔍 Valuation":
 
     val_type = st.radio("Property type", ["🏠 HDB Resale", "🏢 Private Condo/Apt", "📊 Market Heatmap"], horizontal=True)
 
+    # ── Session state init — Private Condo results ────────────────────────────
+    for _sk in ("val_priv_result", "val_priv_proj_hist", "val_priv_district",
+                "val_priv_floor", "val_priv_area", "val_priv_project_name",
+                "val_priv_path"):
+        if _sk not in st.session_state:
+            st.session_state[_sk] = None
+
+    # Clear Private Condo results when switching away from that tab
+    if val_type != "🏢 Private Condo/Apt":
+        for _sk in ("val_priv_result", "val_priv_proj_hist", "val_priv_path"):
+            st.session_state[_sk] = None
+
     if val_type == "🏠 HDB Resale":
         records = _cached_hdb_records()
         towns_available = sorted(set(r['town'] for r in records))
@@ -1586,129 +1599,132 @@ elif tab_select == "🔍 Valuation":
 
             if st.button("Value Property", type="primary", key="val_priv"):
                 agent = ValuationAgent()
+                # Store inputs for the results renderer below
+                st.session_state["val_priv_district"]     = district
+                st.session_state["val_priv_floor"]        = priv_floor
+                st.session_state["val_priv_area"]         = area_sqft
+                st.session_state["val_priv_project_name"] = priv_project_input.strip()
 
                 # ── Path A: Project name given → URA transaction lookup ───────
-                if priv_project_input.strip():
-                    with st.spinner(f"Searching URA transactions for '{priv_project_input}'..."):
+                _used_project = priv_project_input.strip()
+                if _used_project:
+                    with st.spinner(f"Searching URA transactions for '{_used_project}'..."):
                         try:
                             from agents.price_history import get_project_history as _priv_ph2
-                            _all_ura2   = _cached_ura_transactions()
-                            _proj_hist  = _priv_ph2(priv_project_input.strip(), _all_ura2)
+                            _proj_hist = _priv_ph2(_used_project, _cached_ura_transactions())
                         except Exception as _ue2:
-                            _proj_hist  = None
+                            _proj_hist = None
                             st.error(f"URA lookup error: {_ue2}")
 
                     if _proj_hist and _proj_hist.get("match_count", 0) > 0:
-                        _pq = _proj_hist.get("quarters", [])
-                        _latest_q  = _pq[-1] if _pq else {}
-                        _med_psf   = _proj_hist.get("latest_median_psf", 0)
-                        _p25_psf   = _latest_q.get("min_psf", 0)
-                        _p75_psf   = _latest_q.get("max_psf", 0)
-                        # Floor premium: +0.5% per floor above 5th
-                        _floor_adj = 1 + max(0, priv_floor - 5) * 0.005
-                        _adj_psf   = round(_med_psf * _floor_adj)
-                        _est_val   = round(_adj_psf * area_sqft)
-
-                        st.success(f"✅ Found **{_proj_hist['match_count']:,} transactions** for '{priv_project_input}'")
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Est. Value",       f"${_est_val:,.0f}",
-                                  help=f"Latest median PSF × {area_sqft:,} sqft × floor adj")
-                        c2.metric("Project Median PSF", f"${_med_psf:,.0f}")
-                        c3.metric("PSF Range (latest Q)", f"${_p25_psf:,}–${_p75_psf:,}")
-                        c4.metric("Floor-adj PSF",    f"${_adj_psf:,.0f}",
-                                  help=f"Floor {priv_floor}: +{round((_floor_adj-1)*100,1):.1f}% vs median")
-                        if asking_price > 0:
-                            _ask_psf = round(asking_price / area_sqft)
-                            _vs_proj = round((asking_price - _est_val) / _est_val * 100, 1) if _est_val else 0
-                            st.divider()
-                            va, vb, vc = st.columns(3)
-                            va.metric("Asking PSF",          f"${_ask_psf:,.0f}")
-                            vb.metric("Asking vs Project",   f"{_vs_proj:+.1f}%",
-                                      delta="Above market" if _vs_proj>5 else ("Fair" if abs(_vs_proj)<=5 else "Below market"))
-                            vc.metric("Deal Score",          f"{max(0,min(100,round(50-_vs_proj*2)))}/100",
-                                      help="100 = deeply below market")
-
-                        # PSF trend chart
-                        if _pq:
-                            import pandas as _pvpd
-                            st.divider()
-                            st.subheader(f"📈 PSF Trend — {priv_project_input.title()}")
-                            _pvdf = _pvpd.DataFrame(_pq).set_index("quarter")
-                            if not _pvdf.empty and _pvdf["median_psf"].max() > 0:
-                                st.line_chart(_pvdf["median_psf"], height=240)
-                            st.dataframe(_pvdf[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
-                                "median_psf":"Median PSF","min_psf":"Min PSF","max_psf":"Max PSF",
-                                "count":"# Txns","median_price":"Median Price (SGD)"
-                            }), use_container_width=True)
-                            st.caption(f"PSF trend for {priv_project_input.title()}. "
-                                       f"Change: **{_proj_hist['psf_change_pct']:+.1f}%** from {_pq[0]['quarter']} to {_pq[-1]['quarter']}.")
-
-                        # ── Rental intel for project's district ───────────────
-                        _est_val_a = round(_adj_psf * area_sqft) if _adj_psf else 0
-                        _show_rental_intel(district, _est_val_a)
+                        st.session_state["val_priv_proj_hist"] = _proj_hist
+                        st.session_state["val_priv_result"]    = None
+                        st.session_state["val_priv_path"]      = "A"
                     else:
-                        st.warning(f"No URA transactions found for **'{priv_project_input}'** — showing district benchmark instead.")
-                        # Fall through to district benchmark below
-                        priv_project_input = ""
+                        st.warning(f"No transactions found for **'{_used_project}'** — using district benchmark.")
+                        _used_project = ""
 
-                # ── Path B: District benchmark (no project name OR project not found) ──
-                if not priv_project_input.strip():
+                # ── Path B: District benchmark ────────────────────────────────
+                if not _used_project:
                     with st.spinner("Analysing URA transactions..."):
-                        result = agent.value_private_property(district, area_sqft, property_type, asking_price, explain=bool(asking_price))
-                    if result.get("status") == "ok":  # noqa — result always defined here
-                        # Floor premium adjustment
-                        _floor_adj2 = 1 + max(0, priv_floor - 5) * 0.005
-                        _adj_med_psf = round(result["median_psf"] * _floor_adj2)
-                        _adj_est_val = round(_adj_med_psf * area_sqft)
-                        st.info(f"📊 Showing **District {district}** benchmark — enter a project name above for property-specific valuation")
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Est. Value (floor adj)", f"${_adj_est_val:,.0f}",
-                                  help=f"Floor {priv_floor}: district median PSF × {_floor_adj2:.3f}")
-                        c2.metric("District Median PSF",    f"${result['median_psf']:,.0f}")
-                        c3.metric("Floor-adj PSF",          f"${_adj_med_psf:,.0f}")
-                        c4.metric("PSF Range (P25–P75)",    f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
-                        if asking_price > 0:
-                            _ask_psf2 = round(asking_price / area_sqft)
-                            _vs_d = result.get("vs_median_pct", 0)
-                            st.metric("Asking vs District Median", f"{_vs_d:+.1f}%", delta=result.get("verdict",""))
-                        if result.get("explanation"):
-                            st.write("**AI Analysis:**", result["explanation"])
+                        _res = agent.value_private_property(district, area_sqft, property_type, asking_price, explain=bool(asking_price))
+                    st.session_state["val_priv_result"]    = _res
+                    st.session_state["val_priv_proj_hist"] = None
+                    st.session_state["val_priv_path"]      = "B"
 
-                        # ── Rental Intelligence (District) — inside ok block ──
-                        _priv_est_val_b = _adj_est_val  # floor-adjusted
-                        _show_rental_intel(district, _priv_est_val_b)
+            # ── Render results from session state (safe — no chart on page load) ──
+            _vp_path     = st.session_state.get("val_priv_path")
+            _vp_district = st.session_state.get("val_priv_district") or district
+            _vp_floor    = st.session_state.get("val_priv_floor")    or priv_floor
+            _vp_area     = st.session_state.get("val_priv_area")     or area_sqft
+            _vp_projname = st.session_state.get("val_priv_project_name") or ""
 
-                    else:
-                        st.warning(result.get("message", "Insufficient data for this district."))
+            if _vp_path == "A":
+                _proj_hist = st.session_state["val_priv_proj_hist"]
+                _pq        = _proj_hist.get("quarters", [])
+                _latest_q  = _pq[-1] if _pq else {}
+                _med_psf   = _proj_hist.get("latest_median_psf", 0)
+                _floor_adj = 1 + max(0, _vp_floor - 5) * 0.005
+                _adj_psf   = round(_med_psf * _floor_adj)
+                _est_val   = round(_adj_psf * _vp_area)
 
-                    # ── PDF Export ── (only if result available)
-                    if result.get("status") == "ok":
-                        st.divider()
-                        if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
-                            try:
-                                from agents.pdf_report import generate_valuation_report
-                                pdf_bytes = generate_valuation_report(
-                                    property_address=f"District {district}",
-                                    property_type=property_type,
-                                    area_sqft=area_sqft,
-                                    estimated_value=result.get("estimated_value_sgd", 0),
-                                    median_price=result.get("median_psf", 0) * area_sqft,
-                                    transactions_used=result.get("transactions_used", 0),
-                                    asking_price=asking_price,
-                                    vs_median_pct=result.get("vs_median_pct", 0),
-                                    verdict=result.get("verdict", ""),
-                                    ai_analysis=result.get("explanation", ""),
-                                    district=district,
-                                )
-                                st.download_button(
-                                    "💾 Save PDF", pdf_bytes,
-                                    file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
-                                    mime="application/pdf", key="dl_pdf_priv"
-                                )
-                            except ImportError:
-                                st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
-                            except Exception as _pe:
-                                st.error(f"PDF error: {_pe}")
+                st.success(f"✅ Found **{_proj_hist['match_count']:,} transactions** for '{_vp_projname}'")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Est. Value",           f"${_est_val:,.0f}",
+                          help=f"Latest median PSF × {_vp_area:,} sqft × floor adj")
+                c2.metric("Project Median PSF",   f"${_med_psf:,.0f}")
+                c3.metric("PSF Range (latest Q)", f"${_latest_q.get('min_psf',0):,}–${_latest_q.get('max_psf',0):,}")
+                c4.metric("Floor-adj PSF",        f"${_adj_psf:,.0f}",
+                          help=f"Floor {_vp_floor}: +{round((_floor_adj-1)*100,1):.1f}% vs median")
+                if asking_price > 0 and _est_val:
+                    _ask_psf = round(asking_price / _vp_area)
+                    _vs_proj = round((asking_price - _est_val) / _est_val * 100, 1)
+                    st.divider()
+                    va, vb, vc = st.columns(3)
+                    va.metric("Asking PSF",        f"${_ask_psf:,.0f}")
+                    vb.metric("Asking vs Project", f"{_vs_proj:+.1f}%",
+                              delta="Above market" if _vs_proj>5 else ("Fair" if abs(_vs_proj)<=5 else "Below market"))
+                    vc.metric("Deal Score",        f"{max(0,min(100,round(50-_vs_proj*2)))}/100",
+                              help="100 = deeply below market")
+                if _pq and _med_psf > 0:
+                    import pandas as _pvpd
+                    st.divider()
+                    st.subheader(f"📈 PSF Trend — {_vp_projname.title()}")
+                    _pvdf = _pvpd.DataFrame(_pq).set_index("quarter")
+                    if not _pvdf.empty and _pvdf["median_psf"].max() > 0:
+                        st.line_chart(_pvdf["median_psf"], height=240)
+                    st.dataframe(_pvdf[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
+                        "median_psf":"Median PSF","min_psf":"Min PSF","max_psf":"Max PSF",
+                        "count":"# Txns","median_price":"Median Price (SGD)"
+                    }), use_container_width=True)
+                    if len(_pq) >= 2:
+                        st.caption(f"Change: **{_proj_hist['psf_change_pct']:+.1f}%** from {_pq[0]['quarter']} to {_pq[-1]['quarter']}.")
+                _show_rental_intel(_vp_district, round(_adj_psf * _vp_area) if _adj_psf else 0)
+
+            elif _vp_path == "B":
+                result = st.session_state["val_priv_result"] or {}
+                if result.get("status") == "ok":
+                    _floor_adj2  = 1 + max(0, _vp_floor - 5) * 0.005
+                    _adj_med_psf = round(result["median_psf"] * _floor_adj2)
+                    _adj_est_val = round(_adj_med_psf * _vp_area)
+                    st.info(f"📊 **District {_vp_district}** benchmark — enter a project name for property-specific valuation")
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Est. Value (floor adj)", f"${_adj_est_val:,.0f}")
+                    c2.metric("District Median PSF",    f"${result['median_psf']:,.0f}")
+                    c3.metric("Floor-adj PSF",          f"${_adj_med_psf:,.0f}")
+                    c4.metric("PSF Range (P25–P75)",    f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+                    if asking_price > 0:
+                        st.metric("Asking vs District Median", f"{result.get('vs_median_pct',0):+.1f}%",
+                                  delta=result.get("verdict",""))
+                    if result.get("explanation"):
+                        st.write("**AI Analysis:**", result["explanation"])
+                    _show_rental_intel(_vp_district, _adj_est_val)
+                    st.divider()
+                    if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
+                        try:
+                            from agents.pdf_report import generate_valuation_report
+                            pdf_bytes = generate_valuation_report(
+                                property_address=f"District {_vp_district}",
+                                property_type=property_type,
+                                area_sqft=_vp_area,
+                                estimated_value=result.get("estimated_value_sgd", 0),
+                                median_price=result.get("median_psf", 0) * _vp_area,
+                                transactions_used=result.get("transactions_used", 0),
+                                asking_price=asking_price,
+                                vs_median_pct=result.get("vs_median_pct", 0),
+                                verdict=result.get("verdict", ""),
+                                ai_analysis=result.get("explanation", ""),
+                                district=_vp_district,
+                            )
+                            st.download_button("💾 Save PDF", pdf_bytes,
+                                file_name=f"PropOS_Valuation_D{_vp_district}_{date.today()}.pdf",
+                                mime="application/pdf", key="dl_pdf_priv")
+                        except ImportError:
+                            st.warning("PDF export requires `fpdf2`.")
+                        except Exception as _pe:
+                            st.error(f"PDF error: {_pe}")
+                else:
+                    st.warning(result.get("message", "Insufficient data for this district."))
 
     else:  # Heatmap
         heatmap_type = st.radio("Heatmap type", ["🏠 HDB — All Towns", "🏢 Private — All Districts"], horizontal=True)
