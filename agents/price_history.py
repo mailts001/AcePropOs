@@ -92,8 +92,8 @@ def get_project_history(
         date_str = txn.get("contractDate", "") or txn.get("saleDate", "") or ""
         q = _quarter(date_str)
 
-        # PSF
-        psf = txn.get("unitPrice", None) or txn.get("psf", None)
+        # PSF — URA pipeline stores as "psf_sgd"; legacy/other sources use "unitPrice" or "psf"
+        psf = (txn.get("psf_sgd") or txn.get("unitPrice") or txn.get("psf"))
         if psf:
             try:
                 by_quarter[q].append(float(psf))
@@ -101,7 +101,7 @@ def get_project_history(
                 pass
 
         # Total price
-        price = txn.get("price", None) or txn.get("transactionPrice", None)
+        price = txn.get("price_sgd") or txn.get("price") or txn.get("transactionPrice")
         if price:
             try:
                 by_quarter_prices[q].append(float(price))

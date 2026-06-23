@@ -206,6 +206,17 @@ def _cached_ura_transactions():
     from data.ura_pipeline import load_all_transactions
     return load_all_transactions()
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_districts_with_data():
+    """Pre-compute all 28 district stats in one pass — avoids 112 file reads per render."""
+    from data.ura_pipeline import get_district_stats
+    result = []
+    for d in range(1, 29):
+        s = get_district_stats(d)
+        if s.get("count", 0) >= 5:
+            result.append((d, s["count"], s["median_psf"], s))
+    return result
+
 # ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -947,11 +958,14 @@ if tab_select == "🏠 Address Lookup":
         else:
             _priv_project  = st.text_input("Project / Condo Name", placeholder="e.g. The Sail, Parc Clematis, Marina Bay Sands Residences", key="priv_project_name")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             district  = st.number_input("District (for benchmark)", 1, 28, _priv_district, key="priv_dist_num")
         with col2:
             area_sqft = st.number_input("Area (sqft)", 300, 5000, 1000, key="priv_area_num")
+        with col3:
+            priv_floor = st.number_input("Floor / Storey", 1, 80, 10, key="priv_floor_addr",
+                                         help="Used to filter results to similar floors (±5 floors)")
         asking = st.number_input("Asking Price (SGD)", 0, 20000000, 0, step=10000, key="priv_ask")
 
         if st.button("🔍 Look Up Property", type="primary", key="priv_lookup_btn"):
@@ -968,30 +982,86 @@ if tab_select == "🏠 Address Lookup":
                         st.error(f"URA search error: {_ue}")
 
                 if _ph_data and _ph_data.get("match_count", 0) > 0:
-                    q_list = _ph_data.get("quarters", [])
-                    latest_q = q_list[-1] if q_list else {}
-                    earliest_q = q_list[0] if q_list else {}
+                    q_list      = _ph_data.get("quarters", [])
+                    earliest_q  = q_list[0] if q_list else {}
+                    latest_q    = q_list[-1] if q_list else {}
+                    _med_psf_al = _ph_data.get("latest_median_psf", 0)
+
+                    # ── Filter to nearby floors (±5 of selected floor) ────────
+                    import re as _re2
+                    _all_ura2b = _cached_ura_transactions()
+                    _proj_all_txns = [t for t in _all_ura2b
+                                      if _priv_project.lower() in str(t.get("project","")).lower()]
+                    _floor_txns = []
+                    for _ft in _proj_all_txns:
+                        _fr = str(_ft.get("floor_range","") or "")
+                        _nums = _re2.findall(r'\d+', _fr)
+                        if _nums:
+                            _f_mid = (int(_nums[0]) + int(_nums[-1])) // 2
+                            if abs(_f_mid - priv_floor) <= 5:
+                                _floor_txns.append(_ft)
+
+                    _floor_psfs = [float(t.get("psf_sgd",0)) for t in _floor_txns if t.get("psf_sgd",0) > 0]
+                    _floor_med_psf = round(sum(_floor_psfs)/len(_floor_psfs)) if _floor_psfs else _med_psf_al
+
+                    # Floor premium vs overall median
+                    _floor_prem = round((_floor_med_psf - _med_psf_al) / _med_psf_al * 100, 1) if _med_psf_al else 0
+
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Matching Transactions", f"{_ph_data['match_count']:,}")
-                    c2.metric("Latest Median PSF",     f"SGD {_ph_data['latest_median_psf']:,}")
-                    c3.metric("PSF Change (all time)", f"{_ph_data['psf_change_pct']:+.1f}%")
-                    c4.metric("Data from",             earliest_q.get("quarter",""))
-                    if asking > 0 and _ph_data.get("latest_median_psf"):
-                        _est_val = round(_ph_data["latest_median_psf"] * area_sqft)
-                        _vs_ask  = round((asking - _est_val) / _est_val * 100, 1)
-                        st.metric("Asking vs PSF Estimate", f"{_vs_ask:+.1f}%",
-                                  delta="Above market" if _vs_ask > 5 else ("Fair value" if abs(_vs_ask) <= 5 else "Below market"))
-                    # PSF trend chart
-                    if q_list:
+                    c1.metric("Total Transactions",     f"{_ph_data['match_count']:,}",
+                              help=f"From {earliest_q.get('quarter','')} to {latest_q.get('quarter','')}")
+                    c2.metric("Overall Median PSF",     f"SGD {_med_psf_al:,}",
+                              delta=f"{_ph_data['psf_change_pct']:+.1f}% all-time")
+                    c3.metric(f"Floor ~{priv_floor} Median PSF",
+                              f"SGD {_floor_med_psf:,}" if _floor_psfs else "—",
+                              delta=f"{_floor_prem:+.1f}% vs overall" if _floor_psfs else "No floor data",
+                              help=f"{len(_floor_txns)} transactions within ±5 floors of floor {priv_floor}")
+                    _est_val = round(_floor_med_psf * area_sqft)
+                    c4.metric("Est. Value (your unit)", f"SGD {_est_val:,.0f}",
+                              help=f"Floor-adjusted PSF × {area_sqft:,} sqft")
+
+                    if asking > 0 and _med_psf_al:
+                        _ask_psf = round(asking / area_sqft)
+                        _vs_ask  = round((asking - _est_val) / _est_val * 100, 1) if _est_val else 0
+                        st.divider()
+                        va, vb, vc = st.columns(3)
+                        va.metric("Asking PSF",          f"SGD {_ask_psf:,}")
+                        vb.metric("Asking vs Est. Value", f"{_vs_ask:+.1f}%")
+                        vc.metric("Verdict", "Above market 🔴" if _vs_ask > 5 else ("Fair value 🟡" if abs(_vs_ask)<=5 else "Below market 🟢"))
+
+                    # ── PSF trend chart ───────────────────────────────────────
+                    if q_list and _med_psf_al > 0:
                         import pandas as _upd
                         _udf = _upd.DataFrame(q_list).set_index("quarter")
+                        st.divider()
                         st.subheader(f"📈 PSF Trend — {_priv_project.title()}")
-                        st.line_chart(_udf["median_psf"], height=260, use_container_width=True)
-                        st.subheader("📊 Quarterly Transactions")
+                        if not _udf.empty and _udf["median_psf"].max() > 0:
+                            st.line_chart(_udf["median_psf"], height=240, use_container_width=True)
+                        else:
+                            st.info("PSF trend chart unavailable — check URA data sync.")
                         st.dataframe(_udf[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
                             "median_psf":"Median PSF","min_psf":"Min PSF","max_psf":"Max PSF",
                             "count":"# Txns","median_price":"Median Price (SGD)"
                         }), use_container_width=True)
+
+                    # ── Recent transactions (similar floors) ──────────────────
+                    if _floor_txns or _proj_all_txns:
+                        st.divider()
+                        _show_txns = (_floor_txns if _floor_txns else _proj_all_txns)[:30]
+                        _show_txns = sorted(_show_txns, key=lambda t: t.get("contract_date",""), reverse=True)
+                        st.subheader(f"📋 Recent Transactions{' (Floor ±5)' if _floor_txns else ''} — {_priv_project.title()}")
+                        import pandas as _txpd2
+                        st.dataframe(_txpd2.DataFrame([{
+                            "Date":       t.get("contract_date",""),
+                            "Floor Range":t.get("floor_range",""),
+                            "Area (sqft)":int(t.get("area_sqft",0) or 0),
+                            "Price (SGD)":f"${t.get('price_sgd',0):,.0f}",
+                            "PSF":        f"${t.get('psf_sgd',0):,.0f}",
+                            "Type":       t.get("property_type",""),
+                            "Tenure":     t.get("tenure",""),
+                        } for t in _show_txns]), hide_index=True, use_container_width=True)
+                        st.caption(f"Showing {len(_show_txns)} of {len(_proj_all_txns)} total transactions"
+                                   + (f" ({len(_floor_txns)} near floor {priv_floor})" if _floor_txns else ""))
                 else:
                     st.warning(f"No URA transactions found for **{_priv_project}**. Showing district benchmark instead.")
                     # Fall through to district benchmark
@@ -1407,12 +1477,9 @@ elif tab_select == "🔍 Valuation":
             key="val_priv_proj"
         )
 
-        # ── District + property details ──────────────────────────────────────
-        districts_with_data = []
-        for d in range(1, 29):
-            s = get_district_stats(d)
-            if s.get("count", 0) >= 5:
-                districts_with_data.append((d, s["count"], s["median_psf"]))
+        # ── District + property details (use cached stats — fast) ────────────
+        _dist_cache = _cached_districts_with_data()
+        districts_with_data = [(d, cnt, psf) for d, cnt, psf, _ in _dist_cache]
 
         if not districts_with_data:
             st.info(
@@ -1608,26 +1675,21 @@ elif tab_select == "🔍 Valuation":
                         17:3.5,18:3.5,19:3.4,20:3.2,21:3.1,22:3.5,23:3.3,
                         24:3.3,25:3.4,26:3.3,27:3.3,28:3.4}
 
-            with st.spinner("Loading private transaction data..."):
-                hm_priv_data = []
-                for d in range(1, 29):
-                    s = get_district_stats(d)
-                    if s.get("count", 0) >= 5:
-                        med_psf = s["median_psf"]
-                        yield_b = _D_YIELD.get(d, 3.2)
-                        # Est monthly rent from yield benchmark × median price for 1000sqft unit
-                        est_rent = round(med_psf * 1000 * yield_b / 12 / 100, -1)
-                        hm_priv_data.append({
-                            "District": f"D{d}",
-                            "Name": _DIST_NAMES.get(d, ""),
-                            "Median PSF": med_psf,
-                            "P25 PSF": s.get("p25_psf", 0),
-                            "P75 PSF": s.get("p75_psf", 0),
-                            "Transactions": s["count"],
-                            "Est Rent 1000sqft": int(est_rent),
-                            "Gross Yield %": yield_b,
-                            "Net Yield %": round(yield_b - 1.5, 1),
-                        })
+            hm_priv_data = []
+            for d, cnt, med_psf, s in _cached_districts_with_data():
+                yield_b = _D_YIELD.get(d, 3.2)
+                est_rent = round(med_psf * 1000 * yield_b / 12 / 100, -1) if med_psf > 0 else 0
+                hm_priv_data.append({
+                    "District": f"D{d}",
+                    "Name": _DIST_NAMES.get(d, ""),
+                    "Median PSF": med_psf,
+                    "P25 PSF": s.get("p25_psf", 0),
+                    "P75 PSF": s.get("p75_psf", 0),
+                    "Transactions": cnt,
+                    "Est Rent 1000sqft": int(est_rent),
+                    "Gross Yield %": yield_b,
+                    "Net Yield %": round(yield_b - 1.5, 1),
+                })
 
             if not hm_priv_data:
                 st.info("No private transaction data cached yet. Run `sync_ura.py` on the VPS.")
@@ -1636,17 +1698,27 @@ elif tab_select == "🔍 Valuation":
                 ph_tab1, ph_tab2, ph_tab3 = st.tabs(["💰 PSF by District", "📈 Yield & Rent", "📊 Full Table"])
                 with ph_tab1:
                     st.caption("Median PSF across all private residential transactions. Sorted highest to lowest.")
-                    st.bar_chart(df_priv.set_index("District")["Median PSF"])
+                    _psf_col = df_priv.set_index("District")["Median PSF"]
+                    if _psf_col.max() > 0:
+                        st.bar_chart(_psf_col)
+                    else:
+                        st.info("PSF data not yet loaded — run `sync_ura.py` on the VPS to sync transactions.")
                     st.caption("Higher PSF = more expensive district. CCR (D1–D11) typically commands premium over OCR (D17–D28).")
                 with ph_tab2:
                     pc1, pc2 = st.columns(2)
                     with pc1:
                         st.subheader("Est. Monthly Rent — 1,000 sqft unit")
-                        st.bar_chart(df_priv.set_index("District")["Est Rent 1000sqft"])
+                        _rent_col = df_priv.set_index("District")["Est Rent 1000sqft"]
+                        if _rent_col.max() > 0:
+                            st.bar_chart(_rent_col)
+                        else:
+                            st.info("No rental data — PSF sync required.")
                         st.caption("Estimate: median PSF × 1,000 sqft × gross yield ÷ 12")
                     with pc2:
                         st.subheader("Gross Rental Yield (%)")
-                        st.bar_chart(df_priv.set_index("District")["Gross Yield %"])
+                        _yield_col = df_priv.set_index("District")["Gross Yield %"]
+                        if _yield_col.max() > 0:
+                            st.bar_chart(_yield_col)
                         st.caption("OCR districts (D17–D28) typically yield more than prime CCR.")
                 with ph_tab3:
                     st.dataframe(
