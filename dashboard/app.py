@@ -5469,23 +5469,32 @@ elif tab_select == "🎨 Marketing Studio":
                     "Once approved, your Mac worker processes it automatically (free). "
                     "Results appear in the **Download Results** tab."
                 )
-                # Send Telegram approval request
+                # Send Telegram approval request with inline buttons
                 _mk_bot_token  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
                 _mk_admin_chat = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
                 if _mk_bot_token and _mk_admin_chat:
                     try:
-                        import requests as _mkr
+                        _jid = _mk_job['job_id']
                         _mk_msg = (
                             f"🎨 *New Marketing Job*\n"
-                            f"ID: `{_mk_job['job_id']}`\n"
-                            f"Label: {_mk_job['user_label']}\n"
-                            f"Type: {_mk_ptype} | Style: {_mk_style}\n\n"
-                            f"Approve from Admin tab or run:\n"
-                            f"`python3 scripts/mac_worker.py` (auto-picks up approved jobs)"
+                            f"ID: `{_jid}`\n"
+                            f"📁 {_mk_job['user_label']}\n"
+                            f"🏠 {_mk_ptype} · 🎨 {_mk_style}"
                         )
-                        _mkr.post(
+                        _mk_keyboard = {
+                            "inline_keyboard": [[
+                                {"text": "✅ Approve", "callback_data": f"marketing_approve_{_jid}"},
+                                {"text": "❌ Reject",  "callback_data": f"marketing_reject_{_jid}"},
+                            ]]
+                        }
+                        _requests_lib.post(
                             f"https://api.telegram.org/bot{_mk_bot_token}/sendMessage",
-                            json={"chat_id": _mk_admin_chat, "text": _mk_msg, "parse_mode": "Markdown"},
+                            json={
+                                "chat_id": _mk_admin_chat,
+                                "text": _mk_msg,
+                                "parse_mode": "Markdown",
+                                "reply_markup": _mk_keyboard,
+                            },
                             timeout=8,
                         )
                     except Exception:

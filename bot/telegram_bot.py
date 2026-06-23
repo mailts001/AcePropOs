@@ -661,6 +661,40 @@ async def button_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"📬 Subs: {subs}\n🤖 Bot: ✅",
                 parse_mode=ParseMode.MARKDOWN)
 
+    # ── Marketing job approval ────────────────────────────────────────────────
+    elif data.startswith("marketing_approve_") or data.startswith("marketing_reject_"):
+        if query.from_user.id != ADMIN_CHAT_ID:
+            await query.answer("⛔ Admin only.", show_alert=True)
+            return
+
+        action  = "approve" if data.startswith("marketing_approve_") else "reject"
+        job_id  = data.replace("marketing_approve_", "").replace("marketing_reject_", "")
+
+        try:
+            from data.marketing_pipeline import approve_job, reject_job, get_job
+            if action == "approve":
+                result = approve_job(job_id)
+                if result:
+                    await query.edit_message_text(
+                        f"✅ *Job approved!*\n`{job_id}`\n\n"
+                        f"Mac worker will process this automatically within 30 seconds.\n"
+                        f"You'll get a completion notification when done.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                else:
+                    await query.answer("Job not found or already processed.", show_alert=True)
+            else:
+                result = reject_job(job_id)
+                if result:
+                    await query.edit_message_text(
+                        f"❌ *Job rejected*\n`{job_id}`",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                else:
+                    await query.answer("Job not found.", show_alert=True)
+        except Exception as e:
+            await query.answer(f"Error: {e}", show_alert=True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Free-text handler — email auto-detect + enquiry forward
