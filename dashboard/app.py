@@ -843,35 +843,117 @@ if tab_select == "🏠 Address Lookup":
                 st.write("No matches found. Try a different keyword.")
 
     else:
-        st.subheader("Private Property — Project Name Lookup")
-        st.info("URA private transaction API endpoint is being updated. While we await the new URL from URA, enter the district and area for a benchmark valuation.")
+        st.subheader("🏢 Private Condo / Apartment Lookup")
 
-        col1, col2, col3 = st.columns(3)
+        # ── Input: Postal Code OR Project Name ───────────────────────────────
+        _priv_mode = st.radio("Search by", ["📮 Postal Code", "🏢 Project Name"], horizontal=True, key="priv_addr_mode")
+
+        _priv_project = ""
+        _priv_district = 15
+
+        if _priv_mode == "📮 Postal Code":
+            _priv_postal = st.text_input("Postal Code (6 digits)", max_chars=6, placeholder="e.g. 018956", key="priv_postal")
+            if _priv_postal and len(_priv_postal) == 6 and _priv_postal.isdigit():
+                try:
+                    _om_p = _requests_lib.get(
+                        "https://www.onemap.gov.sg/api/common/elastic/search"
+                        f"?searchVal={_priv_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                        timeout=6
+                    ).json()
+                    _om_pr = (_om_p.get("results") or [{}])[0]
+                    _priv_bldg = (_om_pr.get("BUILDING","") or "").strip()
+                    _priv_road = (_om_pr.get("ROAD_NAME","") or "").strip()
+                    _priv_blk  = (_om_pr.get("BLK_NO","")   or "").strip()
+                    # Prefer building name; fall back to road name
+                    if _priv_bldg and _priv_bldg.upper() not in ("NIL",""):
+                        _priv_project = _priv_bldg
+                        st.success(f"📍 Resolved: **{_priv_bldg}** ({_priv_road})")
+                    elif _priv_road:
+                        _priv_project = _priv_road
+                        st.info(f"📍 No building name found — searching by road: **{_priv_road}**")
+                    else:
+                        st.warning("Could not resolve this postal code. Try Project Name search.")
+                    # Estimate district from postal sector
+                    _ps = int(_priv_postal[:2])
+                    _PS_DIST = {1:1,2:1,3:1,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,
+                                13:14,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,
+                                22:22,23:23,24:24,25:25,26:26,27:27,28:28}
+                    _priv_district = _PS_DIST.get(_ps, 15)
+                except Exception as _pe:
+                    st.warning(f"Postal lookup failed: {_pe}")
+        else:
+            _priv_project  = st.text_input("Project / Condo Name", placeholder="e.g. The Sail, Parc Clematis, Marina Bay Sands Residences", key="priv_project_name")
+
+        col1, col2 = st.columns(2)
         with col1:
-            project_hint = st.text_input("Project/Condo Name", placeholder="e.g. The Sail, Bishan 8")
+            district  = st.number_input("District (for benchmark)", 1, 28, _priv_district, key="priv_dist_num")
         with col2:
-            district = st.number_input("District", 1, 28, 15)
-        with col3:
-            area_sqft = st.number_input("Area (sqft)", 300, 5000, 1000)
-
+            area_sqft = st.number_input("Area (sqft)", 300, 5000, 1000, key="priv_area_num")
         asking = st.number_input("Asking Price (SGD)", 0, 20000000, 0, step=10000, key="priv_ask")
 
-        if st.button("Get Benchmark Valuation", type="primary"):
+        if st.button("🔍 Look Up Property", type="primary", key="priv_lookup_btn"):
             agent = ValuationAgent()
-            with st.spinner("Calculating district benchmark..."):
-                result = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
-            if result.get("status") == "ok":
-                st.info(f"📊 Showing District {district} benchmark (project-level data available once URA API is restored)")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
-                c2.metric("Median PSF", f"${result['median_psf']:,.0f}")
-                c3.metric("PSF Range", f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
-                if asking > 0:
-                    st.metric("vs District Median", f"{result.get('vs_median_pct',0):+.1f}%", result.get("verdict",""))
-                if result.get("explanation"):
-                    st.write("**AI Analysis:**", result["explanation"])
+            # ── Search URA transaction cache by project name ──────────────────
+            if _priv_project:
+                with st.spinner(f"Searching URA transactions for '{_priv_project}'..."):
+                    try:
+                        from agents.price_history import get_project_history as _priv_ph
+                        _all_ura = _cached_ura_transactions()
+                        _ph_data = _priv_ph(_priv_project, _all_ura)
+                    except Exception as _ue:
+                        _ph_data = None
+                        st.error(f"URA search error: {_ue}")
+
+                if _ph_data and _ph_data.get("match_count", 0) > 0:
+                    q_list = _ph_data.get("quarters", [])
+                    latest_q = q_list[-1] if q_list else {}
+                    earliest_q = q_list[0] if q_list else {}
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Matching Transactions", f"{_ph_data['match_count']:,}")
+                    c2.metric("Latest Median PSF",     f"SGD {_ph_data['latest_median_psf']:,}")
+                    c3.metric("PSF Change (all time)", f"{_ph_data['psf_change_pct']:+.1f}%")
+                    c4.metric("Data from",             earliest_q.get("quarter",""))
+                    if asking > 0 and _ph_data.get("latest_median_psf"):
+                        _est_val = round(_ph_data["latest_median_psf"] * area_sqft)
+                        _vs_ask  = round((asking - _est_val) / _est_val * 100, 1)
+                        st.metric("Asking vs PSF Estimate", f"{_vs_ask:+.1f}%",
+                                  delta="Above market" if _vs_ask > 5 else ("Fair value" if abs(_vs_ask) <= 5 else "Below market"))
+                    # PSF trend chart
+                    if q_list:
+                        import pandas as _upd
+                        _udf = _upd.DataFrame(q_list).set_index("quarter")
+                        st.subheader(f"📈 PSF Trend — {_priv_project.title()}")
+                        st.line_chart(_udf["median_psf"], height=260, use_container_width=True)
+                        st.subheader("📊 Quarterly Transactions")
+                        st.dataframe(_udf[["median_psf","min_psf","max_psf","count","median_price"]].rename(columns={
+                            "median_psf":"Median PSF","min_psf":"Min PSF","max_psf":"Max PSF",
+                            "count":"# Txns","median_price":"Median Price (SGD)"
+                        }), use_container_width=True)
+                else:
+                    st.warning(f"No URA transactions found for **{_priv_project}**. Showing district benchmark instead.")
+                    # Fall through to district benchmark
+                    with st.spinner("Loading district benchmark..."):
+                        result = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
+                    if result.get("status") == "ok":
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("District Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
+                        c2.metric("Median PSF",               f"${result['median_psf']:,.0f}")
+                        c3.metric("PSF Range",                f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+
             else:
-                st.warning(result.get("message", "Insufficient data"))
+                # No project name — show district benchmark only
+                with st.spinner("Calculating district benchmark..."):
+                    result = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
+                if result.get("status") == "ok":
+                    st.info(f"📊 District {district} benchmark")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
+                    c2.metric("Median PSF",      f"${result['median_psf']:,.0f}")
+                    c3.metric("PSF Range",       f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+                    if asking > 0:
+                        st.metric("vs District Median", f"{result.get('vs_median_pct',0):+.1f}%", result.get("verdict",""))
+                else:
+                    st.warning(result.get("message", "Insufficient data"))
 
 # ── Deal Feed ─────────────────────────────────────────────────────────────────
 elif tab_select == "📊 Deal Feed":
@@ -992,126 +1074,159 @@ elif tab_select == "🔍 Valuation":
         # ── Input method: postal code OR town picker ──────────────────────────
         _val_input_method = st.radio("Enter by", ["🏘️ Town / Flat Type", "📮 Postal Code"], horizontal=True, key="val_hdb_input_method")
 
+        # ── session state for resolved postal address ─────────────────────────
+        if "val_postal_block"  not in st.session_state: st.session_state["val_postal_block"]  = ""
+        if "val_postal_street" not in st.session_state: st.session_state["val_postal_street"] = ""
+        if "val_postal_town"   not in st.session_state: st.session_state["val_postal_town"]   = ""
+
         if _val_input_method == "📮 Postal Code":
-            _val_postal = st.text_input("Postal Code (6 digits)", max_chars=6, placeholder="e.g. 520123", key="val_postal_code")
+            _val_postal = st.text_input("Postal Code (6 digits)", max_chars=6, placeholder="e.g. 400320", key="val_postal_code")
             col1, col2 = st.columns(2)
             with col1:
-                flat_type = st.selectbox("Flat Type", ["4 ROOM", "3 ROOM", "5 ROOM", "EXECUTIVE"], key="val_ft_postal")
+                flat_type  = st.selectbox("Flat Type", ["4 ROOM", "3 ROOM", "5 ROOM", "EXECUTIVE"], key="val_ft_postal")
             with col2:
-                area_sqft = st.number_input("Floor Area (sqft)", 500, 2000, 1000, key="val_area_postal")
+                area_sqft  = st.number_input("Floor Area (sqft)", 500, 2000, 1000, key="val_area_postal")
+            asking_price   = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000, key="val_ask_postal")
 
-            # Resolve postal → town via OneMap
-            _val_postal_town = None
+            # Resolve postal → block + street via OneMap (fires on each keystroke, stores in state)
             if _val_postal and len(_val_postal) == 6 and _val_postal.isdigit():
                 try:
-                    _om_val = _requests_lib.get(
+                    _om_val   = _requests_lib.get(
                         "https://www.onemap.gov.sg/api/common/elastic/search"
                         f"?searchVal={_val_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
                         timeout=6
                     ).json()
                     _om_val_r = (_om_val.get("results") or [{}])[0]
-                    _om_val_road = (_om_val_r.get("ROAD_NAME","") or "").strip()
-                    _om_val_blk  = (_om_val_r.get("BLK_NO","") or "").strip()
-                    _om_val_bldg = (_om_val_r.get("BUILDING","") or "").strip()
-                    # Match against HDB records by block+street
-                    _val_addr_matches = [
-                        r for r in records
-                        if _om_val_blk.lower() == r.get("block","").lower()
-                        and _om_val_road.lower() in r.get("street_name","").lower()
-                    ]
-                    if _val_addr_matches:
-                        _val_postal_town = _val_addr_matches[0]["town"]
-                        st.success(f"📍 Found: **{_om_val_blk} {_om_val_road}** → Town: **{_val_postal_town}**" +
-                                   (f" | {_om_val_bldg}" if _om_val_bldg and _om_val_bldg.upper() != "NIL" else ""))
+                    _resolved_blk  = (_om_val_r.get("BLK_NO","")    or "").strip()
+                    _resolved_road = (_om_val_r.get("ROAD_NAME","")  or "").strip()
+                    _resolved_bldg = (_om_val_r.get("BUILDING","")   or "").strip()
+                    if _resolved_blk and _resolved_road:
+                        st.session_state["val_postal_block"]  = _resolved_blk
+                        st.session_state["val_postal_street"] = _resolved_road
+                        # Confirm address from HDB records
+                        _addr_match = next(
+                            (r for r in records
+                             if _resolved_blk.lower() == r.get("block","").lower()
+                             and _resolved_road.lower() in r.get("street_name","").lower()),
+                            None
+                        )
+                        _resolved_town = _addr_match["town"] if _addr_match else "Unknown"
+                        st.session_state["val_postal_town"] = _resolved_town
+                        _bldg_note = f" ({_resolved_bldg})" if _resolved_bldg and _resolved_bldg.upper() not in ("NIL","") else ""
+                        st.success(f"📍 **Block {_resolved_blk} {_resolved_road}**{_bldg_note} · Town: **{_resolved_town}**")
+                        if not _addr_match:
+                            st.caption("⚠️ No HDB resale records found for this exact block — valuation will use town-level data.")
                     else:
-                        # Fall back to postal sector → infer district → known town mapping
-                        _sector = int(_val_postal[:2])
-                        _SECTOR_TOWN = {
-                            1:"CENTRAL AREA",2:"CENTRAL AREA",3:"CENTRAL AREA",4:"CENTRAL AREA",
-                            5:"CLEMENTI",6:"CENTRAL AREA",7:"CENTRAL AREA",8:"CENTRAL AREA",
-                            9:"CENTRAL AREA",10:"CENTRAL AREA",11:"TOA PAYOH",12:"TOAPAYOH",
-                            13:"GEYLANG",14:"GEYLANG",15:"MARINE PARADE",16:"BEDOK",
-                            17:"PASIR RIS",18:"TAMPINES",19:"SERANGOON",20:"ANG MO KIO",
-                            21:"BUKIT PANJANG",22:"JURONG WEST",23:"BUKIT BATOK",24:"CHOA CHU KANG",
-                            25:"WOODLANDS",26:"YISHUN",27:"SEMBAWANG",28:"HOUGANG",
-                            29:"HOUGANG",30:"SENGKANG",31:"PUNGGOL",32:"SENGKANG",
-                            33:"PUNGGOL",34:"PUNGGOL",35:"BISHAN",36:"BISHAN",
-                            37:"BISHAN",38:"KALLANG/WHAMPOA",39:"KALLANG/WHAMPOA",
-                            40:"MARINE PARADE",41:"MARINE PARADE",42:"TAMPINES",
-                            43:"BEDOK",44:"BEDOK",45:"PASIR RIS",46:"PASIR RIS",
-                            47:"TAMPINES",48:"TAMPINES",49:"JURONG EAST",50:"JURONG WEST",
-                            51:"JURONG WEST",52:"JURONG EAST",53:"JURONG WEST",54:"JURONG WEST",
-                            55:"BUKIT MERAH",56:"QUEENSTOWN",57:"QUEENSTOWN",58:"QUEENSTOWN",
-                            59:"QUEENSTOWN",60:"TOA PAYOH",61:"TOA PAYOH",62:"TOA PAYOH",
-                            63:"TOA PAYOH",64:"TOA PAYOH",65:"HOUGANG",66:"HOUGANG",
-                            67:"HOUGANG",68:"SENGKANG",69:"ANG MO KIO",70:"ANG MO KIO",
-                            71:"ANG MO KIO",72:"BISHAN",73:"BISHAN",75:"BUKIT PANJANG",
-                            76:"BUKIT PANJANG",77:"WOODLANDS",78:"WOODLANDS",79:"WOODLANDS",
-                            80:"WOODLANDS",81:"SEMBAWANG",82:"YISHUN",
-                        }
-                        _val_postal_town = _SECTOR_TOWN.get(_sector)
-                        if _val_postal_town:
-                            st.info(f"📍 Postal sector {_sector:02d} → estimated town: **{_val_postal_town}** (no exact block match found)")
-                        else:
-                            st.warning("Could not determine town from this postal code. Please use Town picker instead.")
+                        st.warning("OneMap could not resolve this postal code. Check the number or use Town picker.")
                 except Exception as _ve:
-                    st.warning(f"Postal lookup error: {_ve}. Use Town picker instead.")
+                    st.warning(f"Postal lookup error: {_ve}")
+            elif _val_postal:
+                st.caption("Enter all 6 digits.")
 
-            town = _val_postal_town or (towns_available[0] if towns_available else "TAMPINES")
-            asking_price = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000, key="val_ask_postal")
+            # Use resolved values from state
+            town = st.session_state.get("val_postal_town") or (towns_available[0] if towns_available else "TAMPINES")
+            _postal_block  = st.session_state.get("val_postal_block","")
+            _postal_street = st.session_state.get("val_postal_street","")
+
         else:
             col1, col2 = st.columns(2)
             with col1:
                 town = st.selectbox("Town", towns_available, index=towns_available.index("TAMPINES") if "TAMPINES" in towns_available else 0)
                 flat_type = st.selectbox("Flat Type", ["3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE"])
             with col2:
-                area_sqft = st.number_input("Floor Area (sqft)", 500, 2000, 1000)
+                area_sqft    = st.number_input("Floor Area (sqft)", 500, 2000, 1000)
                 asking_price = st.number_input("Asking Price (SGD, 0 = estimate only)", 0, 2000000, 0, step=5000)
+            _postal_block  = ""
+            _postal_street = ""
 
         if st.button("Value HDB", type="primary", key="val_hdb"):
             agent = ValuationAgent()
-            with st.spinner("Analysing transactions..."):
-                result = agent.value_hdb(town.upper(), flat_type, area_sqft, asking_price, explain=bool(asking_price))
-            if result.get("status") == "ok":
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
-                c2.metric("Town Median", f"${result['median_price_sgd']:,.0f}")
-                c3.metric("Transactions Used", result['transactions_used'])
-                if asking_price > 0:
-                    st.metric("vs Town Median", f"{result.get('vs_median_pct',0):+.1f}%", delta=result.get('verdict',''))
-                    st.info(f"Deal Score: **{result.get('deal_score',0)}/100**")
-                if result.get("explanation"):
-                    st.write("**AI Analysis:**", result["explanation"])
-                # PDF export
-                st.divider()
-                if st.button("📄 Download Valuation Report (PDF)", key="pdf_hdb"):
-                    try:
-                        from agents.pdf_report import generate_valuation_report
-                        _ft_key2 = flat_type if flat_type in ("3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE") else "4 ROOM"
-                        _rent_est = _VAL_TOWN_RENT.get(town.upper(), {}).get(_ft_key2, 0) if '_VAL_TOWN_RENT' in dir() else 0
-                        pdf_bytes = generate_valuation_report(
-                            property_address=f"{town} — {flat_type}",
-                            property_type="HDB Resale",
-                            area_sqft=area_sqft,
-                            estimated_value=result.get("estimated_value_sgd", 0),
-                            median_price=result.get("median_price_sgd", 0),
-                            transactions_used=result.get("transactions_used", 0),
-                            asking_price=asking_price,
-                            vs_median_pct=result.get("vs_median_pct", 0),
-                            verdict=result.get("verdict", ""),
-                            ai_analysis=result.get("explanation", ""),
-                            rental_monthly=_rent_est,
-                            gross_yield_pct=round(_rent_est * 12 / result["estimated_value_sgd"] * 100, 2) if _rent_est and result.get("estimated_value_sgd") else 0,
-                        )
-                        st.download_button("💾 Save PDF", pdf_bytes,
-                            file_name=f"PropOS_{town}_{flat_type.replace(' ','_')}_{date.today()}.pdf",
-                            mime="application/pdf", key="dl_pdf_hdb")
-                    except ImportError:
-                        st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
-                    except Exception as _pe:
-                        st.error(f"PDF error: {_pe}")
+            # ── Postal mode with resolved block → address-specific lookup ─────
+            if _val_input_method == "📮 Postal Code" and _postal_block and _postal_street:
+                with st.spinner(f"Looking up Block {_postal_block} {_postal_street}..."):
+                    result = agent.value_by_address(_postal_block, _postal_street, asking_price, flat_type, explain=bool(asking_price))
+                if result.get("status") == "ok":
+                    st.success(f"✅ Found **{result.get('transaction_count',0)} transactions** for Block {_postal_block} {_postal_street}")
+                    st.caption(f"🏘️ Town: {result.get('town','')} | Type: {result.get('flat_type','')} | Lease remaining: {result.get('remaining_lease','')}")
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Latest Price",    f"${result.get('latest_transacted_price',0):,.0f}", result.get('latest_transaction_month',''))
+                    c2.metric("Latest PSF",      f"${result.get('latest_transacted_psf',0):,.0f}")
+                    c3.metric("Address Median",  f"${result.get('address_median_price',0):,.0f}")
+                    c4.metric("Town Median",     f"${result.get('town_median_price',0):,.0f}")
+                    if asking_price > 0:
+                        st.divider()
+                        _vs_addr  = result.get("vs_address_history_pct", 0)
+                        _vs_town  = result.get("vs_town_median_pct")
+                        ca, cb, cc = st.columns(3)
+                        ca.metric("Asking vs This Block",  f"{_vs_addr:+.1f}%")
+                        if _vs_town is not None:
+                            cb.metric("Asking vs Town Median", f"{_vs_town:+.1f}%")
+                        cc.metric("Deal Score", f"{result.get('deal_score',0)}/100")
+                        st.info(f"**Verdict:** {result.get('verdict','')}")
+                    # Recent transactions table
+                    _addr_txns = result.get("recent_transactions",[])
+                    if _addr_txns:
+                        st.divider()
+                        st.subheader(f"📋 Transaction History — Block {_postal_block} {_postal_street}")
+                        import pandas as _ap
+                        st.dataframe(_ap.DataFrame([{
+                            "Month":       t.get("month",""),
+                            "Flat Type":   t.get("flat_type",""),
+                            "Storey":      t.get("storey_range",""),
+                            "Area (sqft)": int(t.get("floor_area_sqft",0) or 0),
+                            "Price (SGD)": f"${t.get('resale_price',0):,.0f}",
+                            "PSF":         f"${t.get('psf_sgd',0):,.0f}",
+                        } for t in _addr_txns]), hide_index=True, use_container_width=True)
+                else:
+                    st.warning(result.get("message","Address not found — try Address Lookup tab or use Town picker."))
+                    if result.get("suggestions"):
+                        st.write("**Nearby addresses:**")
+                        for _s in result["suggestions"][:5]:
+                            st.write(f"  • {_s}")
+
+            # ── Town-level lookup (default / fallback) ─────────────────────────
             else:
-                st.warning(result.get("message", "Insufficient data for this town/flat type"))
+                with st.spinner("Analysing transactions..."):
+                    result = agent.value_hdb(town.upper(), flat_type, area_sqft, asking_price, explain=bool(asking_price))
+                if result.get("status") == "ok":
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Estimated Value",   f"${result['estimated_value_sgd']:,.0f}")
+                    c2.metric("Town Median",       f"${result['median_price_sgd']:,.0f}")
+                    c3.metric("Transactions Used", result['transactions_used'])
+                    if asking_price > 0:
+                        st.metric("vs Town Median", f"{result.get('vs_median_pct',0):+.1f}%", delta=result.get('verdict',''))
+                        st.info(f"Deal Score: **{result.get('deal_score',0)}/100**")
+                    if result.get("explanation"):
+                        st.write("**AI Analysis:**", result["explanation"])
+                    st.divider()
+                    if st.button("📄 Download Valuation Report (PDF)", key="pdf_hdb"):
+                        try:
+                            from agents.pdf_report import generate_valuation_report
+                            _ft_key2  = flat_type if flat_type in ("3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE") else "4 ROOM"
+                            _rent_est = _VAL_TOWN_RENT.get(town.upper(), {}).get(_ft_key2, 0) if '_VAL_TOWN_RENT' in dir() else 0
+                            pdf_bytes = generate_valuation_report(
+                                property_address=f"{town} — {flat_type}",
+                                property_type="HDB Resale",
+                                area_sqft=area_sqft,
+                                estimated_value=result.get("estimated_value_sgd", 0),
+                                median_price=result.get("median_price_sgd", 0),
+                                transactions_used=result.get("transactions_used", 0),
+                                asking_price=asking_price,
+                                vs_median_pct=result.get("vs_median_pct", 0),
+                                verdict=result.get("verdict", ""),
+                                ai_analysis=result.get("explanation", ""),
+                                rental_monthly=_rent_est,
+                                gross_yield_pct=round(_rent_est * 12 / result["estimated_value_sgd"] * 100, 2) if _rent_est and result.get("estimated_value_sgd") else 0,
+                            )
+                            st.download_button("💾 Save PDF", pdf_bytes,
+                                file_name=f"PropOS_{town}_{flat_type.replace(' ','_')}_{date.today()}.pdf",
+                                mime="application/pdf", key="dl_pdf_hdb")
+                        except ImportError:
+                            st.warning("PDF export requires `fpdf2`.")
+                        except Exception as _pe:
+                            st.error(f"PDF error: {_pe}")
+                else:
+                    st.warning(result.get("message", "Insufficient data for this town/flat type"))
 
         # Town price + yield trend
         st.divider()
