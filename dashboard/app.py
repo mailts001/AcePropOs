@@ -217,43 +217,39 @@ def _cached_districts_with_data():
             result.append((d, s["count"], s["median_psf"], s))
     return result
 
-def _show_rental_intel(district: int, est_val_sgd: int = 0):
+def _show_rental_intel(district: int, est_val_sgd: int = 0, area_sqft: int = 1000):
     """
     Render URA rental market stats from cache only — never blocks render thread.
-    Cache is seeded by sync_ura.py (daily cron). Call from session-state-gated blocks.
+    Uses project-level median rental PSF aggregated to district level.
+    Cache seeded by sync_ura.py (daily cron).
     """
     st.divider()
     st.subheader(f"🏘️ Rental Market — District {district}")
     try:
         from data.ura_rental_pipeline import get_district_rental_stats
-        _rs = get_district_rental_stats(district)  # cache-only, instant
+        _rs = get_district_rental_stats(district, area_sqft=area_sqft or 1000)
         if _rs.get("status") == "ok":
-            st.caption(f"URA median rental data · {_rs.get('latest_quarter','latest available')}")
-            _bd = _rs.get("by_bedrooms", {})
-            if _bd:
-                import pandas as _rrpd
-                _rrows = []
-                for _beds, _info in sorted(_bd.items()):
-                    _label = f"{_beds} BR" if str(_beds) not in ("NA","") else "Studio/NA"
-                    _med   = _info.get("median_rent_sgd") or 0
-                    _p25   = _info.get("p25_rent_sgd") or 0
-                    _p75   = _info.get("p75_rent_sgd") or 0
-                    _gy    = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
-                    _rrows.append({
-                        "Bedrooms":        _label,
-                        "Median Rent/mo":  f"${_med:,.0f}" if _med else "—",
-                        "Range (P25–P75)": f"${_p25:,.0f} – ${_p75:,.0f}" if _p25 else "—",
-                        "Est. Gross Yield": f"{_gy:.2f}%" if _gy else "—",
-                    })
-                st.dataframe(_rrpd.DataFrame(_rrows), hide_index=True, use_container_width=True)
-                st.caption("Yield based on estimated/asking value. Actual yield depends on unit size, floor and furnishing.")
-            else:
-                st.info("No rental breakdown by bedroom type for this district in current cache.")
+            _q   = _rs.get("latest_quarter", "")
+            _med = _rs.get("med_rent_sgd", 0)
+            _p25 = _rs.get("p25_rent_sgd", 0)
+            _p75 = _rs.get("p75_rent_sgd", 0)
+            _gy  = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
+            _ny  = round(_gy - 1.5, 2) if _gy else 0
+
+            st.caption(f"URA project-level median rental PSF · {_q} · {_rs.get('project_count',0)} projects in D{district}")
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            rc1.metric("Median Rent/mo",   f"${_med:,.0f}", help=f"Based on {area_sqft:,} sqft × median PSF ${_rs.get('median_psf',0):.2f}/sqft/mo")
+            rc2.metric("Range (P25–P75)",  f"${_p25:,.0f} – ${_p75:,.0f}")
+            rc3.metric("Est. Gross Yield", f"{_gy:.2f}%" if _gy else "—")
+            rc4.metric("Est. Net Yield",   f"{_ny:.2f}%" if _ny else "—", help="~1.5% deducted for maintenance, vacancy, property tax")
+
+            if _rs.get("sample_projects"):
+                st.caption("Sample projects: " + " · ".join(_rs["sample_projects"]))
+            st.caption("Rental yield calculated against your estimated/asking value. Actual yield varies by unit size, floor and furnishing.")
         else:
-            # Cache empty — cron hasn't run yet or sync_ura.py not run manually
             st.info(
-                "📋 **Rental data not yet cached.** Run once on the VPS to populate "
-                "(then refreshes automatically every day):\n"
+                "📋 **Rental data not yet cached.** Run once on the VPS "
+                "(then auto-refreshes daily):\n"
                 "```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```"
             )
     except Exception as _rle:
@@ -1106,7 +1102,7 @@ if tab_select == "🏠 Address Lookup":
                                    + (f" ({len(_floor_txns)} near floor {priv_floor})" if _floor_txns else ""))
 
                     # ── Rental intel for this project's district ──────────────
-                    _show_rental_intel(district, _est_val)
+                    _show_rental_intel(district, _est_val, area_sqft=area_sqft)
                 else:
                     st.warning(f"No URA transactions found for **{_priv_project}**. Showing district benchmark instead.")
                     # Fall through to district benchmark
@@ -1117,7 +1113,7 @@ if tab_select == "🏠 Address Lookup":
                         c1.metric("District Estimated Value", f"${_bench['estimated_value_sgd']:,.0f}")
                         c2.metric("Median PSF",               f"${_bench['median_psf']:,.0f}")
                         c3.metric("PSF Range",                f"${_bench['p25_psf']:,.0f}–${_bench['p75_psf']:,.0f}")
-                    _show_rental_intel(district, _bench.get("estimated_value_sgd", 0) if _bench.get("status")=="ok" else 0)
+                    _show_rental_intel(district, _bench.get("estimated_value_sgd",0) if _bench.get("status")=="ok" else 0, area_sqft=area_sqft)
 
             else:
                 # No project name — show district benchmark only
@@ -1131,7 +1127,7 @@ if tab_select == "🏠 Address Lookup":
                     c3.metric("PSF Range",       f"${_bench2['p25_psf']:,.0f}–${_bench2['p75_psf']:,.0f}")
                     if asking > 0:
                         st.metric("vs District Median", f"{_bench2.get('vs_median_pct',0):+.1f}%", _bench2.get("verdict",""))
-                    _show_rental_intel(district, _bench2.get("estimated_value_sgd", 0))
+                    _show_rental_intel(district, _bench2.get("estimated_value_sgd",0), area_sqft=area_sqft)
                 else:
                     st.warning(_bench2.get("message", "Insufficient data"))
 
@@ -1682,7 +1678,7 @@ elif tab_select == "🔍 Valuation":
                     }), use_container_width=True)
                     if len(_pq) >= 2:
                         st.caption(f"Change: **{_proj_hist['psf_change_pct']:+.1f}%** from {_pq[0]['quarter']} to {_pq[-1]['quarter']}.")
-                _show_rental_intel(_vp_district, round(_adj_psf * _vp_area) if _adj_psf else 0)
+                _show_rental_intel(_vp_district, round(_adj_psf * _vp_area) if _adj_psf else 0, area_sqft=_vp_area)
 
             elif _vp_path == "B":
                 result = st.session_state["val_priv_result"] or {}
@@ -1701,7 +1697,7 @@ elif tab_select == "🔍 Valuation":
                                   delta=result.get("verdict",""))
                     if result.get("explanation"):
                         st.write("**AI Analysis:**", result["explanation"])
-                    _show_rental_intel(_vp_district, _adj_est_val)
+                    _show_rental_intel(_vp_district, _adj_est_val, area_sqft=_vp_area)
                     st.divider()
                     if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
                         try:

@@ -105,61 +105,86 @@ def fetch_rental_medians(force: bool = False) -> list[dict]:
     if data.get("Status") != "Success":
         raise RuntimeError(f"URA rental median error: {data}")
 
+    # URA structure: Result[{project, street, rentalMedian:[{district, refPeriod, median(PSF), psf25, psf75}]}]
+    # median/psf25/psf75 are SGD per sqft per month
     records = []
     for item in data.get("Result", []):
-        records.append({
-            "district": item.get("district", ""),
-            "property_type": item.get("propertyType", ""),
-            "bedrooms": item.get("noOfBedRoom", ""),
-            "quarter": item.get("refPeriod", ""),
-            "median_rent": _safe_float(item.get("median")),
-            "p25_rent": _safe_float(item.get("psf25th")),
-            "p75_rent": _safe_float(item.get("psf75th")),
-        })
+        project = item.get("project", "")
+        street  = item.get("street", "")
+        for rm in item.get("rentalMedian", []):
+            records.append({
+                "project":    project,
+                "street":     street,
+                "district":   str(rm.get("district", "")).strip(),
+                "quarter":    rm.get("refPeriod", ""),
+                "median_psf": _safe_float(rm.get("median")),   # SGD/sqft/month
+                "psf25":      _safe_float(rm.get("psf25")),
+                "psf75":      _safe_float(rm.get("psf75")),
+            })
 
     RENTAL_MEDIAN_CACHE.write_text(json.dumps(records))
     return records
 
 
-def get_district_rental_stats(district: int | str) -> dict:
+def get_district_rental_stats(district: int | str, area_sqft: float = 1000) -> dict:
     """
-    Summarise rental market for a district from cache only.
-    Never makes a live API call — safe to call from Streamlit render paths.
-    Cache is populated by sync_ura.py (runs daily via cron).
+    Summarise rental PSF for a district from cache only.
+    Returns median/P25/P75 rental PSF for latest quarter, plus estimated monthly rent.
+    area_sqft: used to compute estimated monthly rent (default 1000 sqft).
+    Never makes live API call — cache populated by sync_ura.py (daily cron).
     """
     try:
-        medians = fetch_rental_medians(force=False)  # cache-only, never blocks
+        records = fetch_rental_medians(force=False)
     except Exception:
-        medians = []
-    # Normalise district for comparison — URA stores as "D15", input may be int 15 or str "15"
-    target = str(district).replace("D","").strip().lstrip("0") or "0"
-    district_data = [
-        m for m in medians
-        if str(m.get("district","")).replace("D","").strip().lstrip("0") == target
-    ]
+        records = []
 
-    if not district_data:
+    if not records:
+        return {"district": district, "status": "no_data"}
+
+    # Normalise district — URA stores as "15" (no D prefix in rentalMedian)
+    target = str(district).replace("D", "").strip()
+    dist_records = [r for r in records if str(r.get("district", "")).strip() == target]
+
+    if not dist_records:
         return {"district": district, "status": "no_data"}
 
     # Latest quarter
-    latest_q = max(d["quarter"] for d in district_data if d.get("quarter"))
-    latest = [d for d in district_data if d.get("quarter") == latest_q]
+    latest_q = max((r["quarter"] for r in dist_records if r.get("quarter")), default="")
+    latest   = [r for r in dist_records if r.get("quarter") == latest_q]
 
-    by_bedrooms = {}
-    for row in latest:
-        bed = row.get("bedrooms", "unknown")
-        by_bedrooms[bed] = {
-            "median_rent_sgd": row["median_rent"],
-            "p25_rent_sgd": row["p25_rent"],
-            "p75_rent_sgd": row["p75_rent"],
-            "property_type": row["property_type"],
-        }
+    psfs    = [r["median_psf"] for r in latest if r.get("median_psf")]
+    p25s    = [r["psf25"]      for r in latest if r.get("psf25")]
+    p75s    = [r["psf75"]      for r in latest if r.get("psf75")]
+
+    if not psfs:
+        return {"district": district, "status": "no_data"}
+
+    import statistics
+    med_psf = round(statistics.median(psfs), 2)
+    p25_psf = round(statistics.median(p25s), 2) if p25s else med_psf * 0.85
+    p75_psf = round(statistics.median(p75s), 2) if p75s else med_psf * 1.15
+
+    # Monthly rent = PSF × area
+    med_rent = round(med_psf * area_sqft / 100) * 100   # round to nearest $100
+    p25_rent = round(p25_psf * area_sqft / 100) * 100
+    p75_rent = round(p75_psf * area_sqft / 100) * 100
+
+    # Sample projects for context
+    projects = sorted(set(r.get("project","") for r in latest if r.get("project")))[:5]
 
     return {
-        "district": district,
+        "district":      district,
         "latest_quarter": latest_q,
-        "by_bedrooms": by_bedrooms,
-        "status": "ok",
+        "median_psf":    med_psf,
+        "p25_psf":       p25_psf,
+        "p75_psf":       p75_psf,
+        "med_rent_sgd":  med_rent,
+        "p25_rent_sgd":  p25_rent,
+        "p75_rent_sgd":  p75_rent,
+        "area_sqft":     area_sqft,
+        "sample_projects": projects,
+        "project_count": len(latest),
+        "status":        "ok",
     }
 
 
