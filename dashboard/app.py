@@ -217,6 +217,40 @@ def _cached_districts_with_data():
             result.append((d, s["count"], s["median_psf"], s))
     return result
 
+def _show_rental_intel(district: int, est_val_sgd: int = 0):
+    """Render URA rental market stats for a given district. Call from inside a button handler."""
+    st.divider()
+    st.subheader(f"🏘️ Rental Market — District {district}")
+    try:
+        from data.ura_rental_pipeline import get_district_rental_stats
+        _rs = get_district_rental_stats(district)
+        if _rs.get("status") == "ok":
+            st.caption(f"URA median rental data · {_rs.get('latest_quarter','latest available')}")
+            _bd = _rs.get("by_bedrooms", {})
+            if _bd:
+                import pandas as _rrpd
+                _rrows = []
+                for _beds, _info in sorted(_bd.items()):
+                    _label  = f"{_beds} BR" if str(_beds) not in ("NA","") else "Studio/NA"
+                    _med    = _info.get("median_rent_sgd") or 0
+                    _p25    = _info.get("p25_rent_sgd") or 0
+                    _p75    = _info.get("p75_rent_sgd") or 0
+                    _gy     = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
+                    _rrows.append({
+                        "Bedrooms":      _label,
+                        "Median Rent/mo":f"${_med:,.0f}" if _med else "—",
+                        "Range (P25–P75)": f"${_p25:,.0f} – ${_p75:,.0f}" if _p25 else "—",
+                        "Est. Gross Yield": f"{_gy:.2f}%" if _gy else "—",
+                    })
+                st.dataframe(_rrpd.DataFrame(_rrows), hide_index=True, use_container_width=True)
+                st.caption("Yield based on your estimated/asking value. Actual yield depends on unit size, floor and furnishing.")
+            else:
+                st.info("No rental breakdown by bedroom type available for this district.")
+        else:
+            st.info("URA rental data not yet cached — run `sync_ura.py` on the VPS to populate.")
+    except Exception as _rle:
+        st.caption(f"Rental data unavailable: {_rle}")
+
 # ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -1062,31 +1096,36 @@ if tab_select == "🏠 Address Lookup":
                         } for t in _show_txns]), hide_index=True, use_container_width=True)
                         st.caption(f"Showing {len(_show_txns)} of {len(_proj_all_txns)} total transactions"
                                    + (f" ({len(_floor_txns)} near floor {priv_floor})" if _floor_txns else ""))
+
+                    # ── Rental intel for this project's district ──────────────
+                    _show_rental_intel(district, _est_val)
                 else:
                     st.warning(f"No URA transactions found for **{_priv_project}**. Showing district benchmark instead.")
                     # Fall through to district benchmark
                     with st.spinner("Loading district benchmark..."):
-                        result = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
-                    if result.get("status") == "ok":
+                        _bench = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
+                    if _bench.get("status") == "ok":
                         c1, c2, c3 = st.columns(3)
-                        c1.metric("District Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
-                        c2.metric("Median PSF",               f"${result['median_psf']:,.0f}")
-                        c3.metric("PSF Range",                f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+                        c1.metric("District Estimated Value", f"${_bench['estimated_value_sgd']:,.0f}")
+                        c2.metric("Median PSF",               f"${_bench['median_psf']:,.0f}")
+                        c3.metric("PSF Range",                f"${_bench['p25_psf']:,.0f}–${_bench['p75_psf']:,.0f}")
+                    _show_rental_intel(district, _bench.get("estimated_value_sgd", 0) if _bench.get("status")=="ok" else 0)
 
             else:
                 # No project name — show district benchmark only
                 with st.spinner("Calculating district benchmark..."):
-                    result = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
-                if result.get("status") == "ok":
+                    _bench2 = agent.value_private_property(district, area_sqft, asking_price=asking, explain=bool(asking))
+                if _bench2.get("status") == "ok":
                     st.info(f"📊 District {district} benchmark")
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Estimated Value", f"${result['estimated_value_sgd']:,.0f}")
-                    c2.metric("Median PSF",      f"${result['median_psf']:,.0f}")
-                    c3.metric("PSF Range",       f"${result['p25_psf']:,.0f}–${result['p75_psf']:,.0f}")
+                    c1.metric("Estimated Value", f"${_bench2['estimated_value_sgd']:,.0f}")
+                    c2.metric("Median PSF",      f"${_bench2['median_psf']:,.0f}")
+                    c3.metric("PSF Range",       f"${_bench2['p25_psf']:,.0f}–${_bench2['p75_psf']:,.0f}")
                     if asking > 0:
-                        st.metric("vs District Median", f"{result.get('vs_median_pct',0):+.1f}%", result.get("verdict",""))
+                        st.metric("vs District Median", f"{_bench2.get('vs_median_pct',0):+.1f}%", _bench2.get("verdict",""))
+                    _show_rental_intel(district, _bench2.get("estimated_value_sgd", 0))
                 else:
-                    st.warning(result.get("message", "Insufficient data"))
+                    st.warning(_bench2.get("message", "Insufficient data"))
 
 # ── Deal Feed ─────────────────────────────────────────────────────────────────
 elif tab_select == "📊 Deal Feed":
@@ -1470,12 +1509,49 @@ elif tab_select == "🔍 Valuation":
         from data.ura_pipeline import get_district_stats
         st.caption("Enter your project name for a property-specific valuation, or just select the district for a benchmark.")
 
-        # ── Project name (optional but preferred) ────────────────────────────
-        priv_project_input = st.text_input(
-            "Project / Development Name (recommended)",
-            placeholder="e.g. The Interlace, Parc Clematis, One Holland Village",
-            key="val_priv_proj"
-        )
+        # ── Input mode: postal code OR project name ──────────────────────────
+        _val_priv_mode = st.radio("Search by", ["🏢 Project / Development Name", "📮 Postal Code"],
+                                   horizontal=True, key="val_priv_mode")
+        priv_project_input = ""
+
+        if _val_priv_mode == "📮 Postal Code":
+            _vp_postal = st.text_input("Postal Code (6 digits)", max_chars=6,
+                                        placeholder="e.g. 439970", key="val_priv_postal")
+            if _vp_postal and len(_vp_postal) == 6 and _vp_postal.isdigit():
+                try:
+                    _vp_om = _requests_lib.get(
+                        "https://www.onemap.gov.sg/api/common/elastic/search"
+                        f"?searchVal={_vp_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                        timeout=6
+                    ).json()
+                    _vp_r = (_vp_om.get("results") or [{}])[0]
+                    _vp_bldg = (_vp_r.get("BUILDING","") or "").strip()
+                    _vp_road = (_vp_r.get("ROAD_NAME","") or "").strip()
+                    _vp_ps   = int(_vp_postal[:2])
+                    _VP_DIST = {1:1,2:1,3:1,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,
+                                13:14,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,
+                                22:22,23:23,24:24,25:25,26:26,27:27,28:28}
+                    _vp_dist_default = _VP_DIST.get(_vp_ps, 15)
+                    if _vp_bldg and _vp_bldg.upper() not in ("NIL",""):
+                        priv_project_input = _vp_bldg
+                        st.success(f"📍 Resolved: **{_vp_bldg}** ({_vp_road}) — will search as project name")
+                    elif _vp_road:
+                        priv_project_input = _vp_road
+                        st.info(f"📍 No development name — searching by road: **{_vp_road}**")
+                    else:
+                        st.warning("Could not resolve postal code. Switch to Project Name search.")
+                except Exception as _vpe:
+                    st.warning(f"Postal lookup error: {_vpe}")
+                    _vp_dist_default = 15
+            else:
+                _vp_dist_default = 15
+        else:
+            priv_project_input = st.text_input(
+                "Project / Development Name (optional — leave blank for district benchmark)",
+                placeholder="e.g. The Interlace, Parc Clematis, One Holland Village",
+                key="val_priv_proj"
+            )
+            _vp_dist_default = 15
 
         # ── District + property details (use cached stats — fast) ────────────
         _dist_cache = _cached_districts_with_data()
@@ -1489,9 +1565,12 @@ elif tab_select == "🔍 Valuation":
             )
         else:
             district_options = {f"D{d} — {cnt} txns, median ${psf:,.0f} PSF": d for d, cnt, psf in districts_with_data}
+            # Pre-select district from postal code if resolved
+            _dist_keys = list(district_options.keys())
+            _dist_default_idx = next((i for i,k in enumerate(_dist_keys) if district_options[k] == _vp_dist_default), 0)
             col1, col2, col3 = st.columns(3)
             with col1:
-                selected    = st.selectbox("District", list(district_options.keys()))
+                selected    = st.selectbox("District", _dist_keys, index=_dist_default_idx)
                 district    = district_options[selected]
             with col2:
                 property_type = st.selectbox("Type", ["Condominium", "Apartment", "Executive Condominium"])
@@ -1559,6 +1638,10 @@ elif tab_select == "🔍 Valuation":
                             }), use_container_width=True)
                             st.caption(f"PSF trend for {priv_project_input.title()}. "
                                        f"Change: **{_proj_hist['psf_change_pct']:+.1f}%** from {_pq[0]['quarter']} to {_pq[-1]['quarter']}.")
+
+                        # ── Rental intel for project's district ───────────────
+                        _est_val_a = round(_adj_psf * area_sqft) if _adj_psf else 0
+                        _show_rental_intel(district, _est_val_a)
                     else:
                         st.warning(f"No URA transactions found for **'{priv_project_input}'** — showing district benchmark instead.")
                         # Fall through to district benchmark below
@@ -1568,7 +1651,7 @@ elif tab_select == "🔍 Valuation":
                 if not priv_project_input.strip():
                     with st.spinner("Analysing URA transactions..."):
                         result = agent.value_private_property(district, area_sqft, property_type, asking_price, explain=bool(asking_price))
-                    if result.get("status") == "ok":
+                    if result.get("status") == "ok":  # noqa — result always defined here
                         # Floor premium adjustment
                         _floor_adj2 = 1 + max(0, priv_floor - 5) * 0.005
                         _adj_med_psf = round(result["median_psf"] * _floor_adj2)
@@ -1587,67 +1670,41 @@ elif tab_select == "🔍 Valuation":
                         if result.get("explanation"):
                             st.write("**AI Analysis:**", result["explanation"])
 
-                    # ── Rental Intelligence for this district ──
-                    st.divider()
-                    st.subheader(f"🏘️ Rental Market — D{district}")
-                    try:
-                        from data.ura_rental_pipeline import get_district_rental_stats
-                        rental_stats = get_district_rental_stats(district)
-                        if rental_stats.get("status") == "ok":
-                            st.caption(f"URA median rental data · {rental_stats.get('latest_quarter','')}")
-                            bed_data = rental_stats.get("by_bedrooms", {})
-                            if bed_data:
-                                import pandas as _rpd
-                                rows = []
-                                for beds, info in sorted(bed_data.items()):
-                                    label = f"{beds} BR" if beds not in ("NA","") else "Studio/NA"
-                                    med = info.get("median_rent_sgd") or 0
-                                    p25 = info.get("p25_rent_sgd") or 0
-                                    p75 = info.get("p75_rent_sgd") or 0
-                                    est_val = result.get("estimated_value_sgd", 0)
-                                    gross_y = round(med * 12 / est_val * 100, 2) if est_val and med else 0
-                                    rows.append({"Bedrooms": label, "Median Rent/mo": f"${med:,.0f}" if med else "—",
-                                                 "P25": f"${p25:,.0f}" if p25 else "—",
-                                                 "P75": f"${p75:,.0f}" if p75 else "—",
-                                                 "Est. Gross Yield": f"{gross_y:.2f}%" if gross_y else "—"})
-                                st.dataframe(_rpd.DataFrame(rows), hide_index=True, use_container_width=True)
-                                st.caption("Yield estimated using your selected property value. Actual yield depends on unit size, floor and furnishing.")
-                            else:
-                                st.info("No rental breakdown available for this district yet.")
-                        else:
-                            st.info("Rental median data not yet cached. Run `sync_ura.py` to populate.")
-                    except Exception as _re:
-                        st.caption(f"Rental data unavailable: {_re}")
+                        # ── Rental Intelligence (District) — inside ok block ──
+                        _priv_est_val_b = _adj_est_val  # floor-adjusted
+                        _show_rental_intel(district, _priv_est_val_b)
 
-                    # ── PDF Export ──
-                    st.divider()
-                    if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
-                        try:
-                            from agents.pdf_report import generate_valuation_report
-                            pdf_bytes = generate_valuation_report(
-                                property_address=f"District {district}",
-                                property_type=property_type,
-                                area_sqft=area_sqft,
-                                estimated_value=result.get("estimated_value_sgd", 0),
-                                median_price=result.get("median_psf", 0) * area_sqft,
-                                transactions_used=result.get("transactions_used", 0),
-                                asking_price=asking_price,
-                                vs_median_pct=result.get("vs_median_pct", 0),
-                                verdict=result.get("verdict", ""),
-                                ai_analysis=result.get("explanation", ""),
-                                district=district,
-                            )
-                            st.download_button(
-                                "💾 Save PDF", pdf_bytes,
-                                file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
-                                mime="application/pdf", key="dl_pdf_priv"
-                            )
-                        except ImportError:
-                            st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
-                        except Exception as _pe:
-                            st.error(f"PDF error: {_pe}")
-                else:
-                    st.warning(result.get("message", "Insufficient data"))
+                    else:
+                        st.warning(result.get("message", "Insufficient data for this district."))
+
+                    # ── PDF Export ── (only if result available)
+                    if result.get("status") == "ok":
+                        st.divider()
+                        if st.button("📄 Download Valuation Report (PDF)", key="pdf_priv"):
+                            try:
+                                from agents.pdf_report import generate_valuation_report
+                                pdf_bytes = generate_valuation_report(
+                                    property_address=f"District {district}",
+                                    property_type=property_type,
+                                    area_sqft=area_sqft,
+                                    estimated_value=result.get("estimated_value_sgd", 0),
+                                    median_price=result.get("median_psf", 0) * area_sqft,
+                                    transactions_used=result.get("transactions_used", 0),
+                                    asking_price=asking_price,
+                                    vs_median_pct=result.get("vs_median_pct", 0),
+                                    verdict=result.get("verdict", ""),
+                                    ai_analysis=result.get("explanation", ""),
+                                    district=district,
+                                )
+                                st.download_button(
+                                    "💾 Save PDF", pdf_bytes,
+                                    file_name=f"PropOS_Valuation_D{district}_{date.today()}.pdf",
+                                    mime="application/pdf", key="dl_pdf_priv"
+                                )
+                            except ImportError:
+                                st.warning("PDF export requires `fpdf2`. Install on the VPS: `pip install fpdf2`")
+                            except Exception as _pe:
+                                st.error(f"PDF error: {_pe}")
 
     else:  # Heatmap
         heatmap_type = st.radio("Heatmap type", ["🏠 HDB — All Towns", "🏢 Private — All Districts"], horizontal=True)
