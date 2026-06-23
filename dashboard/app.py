@@ -171,17 +171,6 @@ from data.watchlist import (init_watchlist_db, add_watch, list_watches,
 from core.llm_router import save_mode, get_current_mode, get_token_summary
 from data.news_pipeline import get_sentiment_index
 
-# ── Cached data loaders (Streamlit caches for 1 hour — avoids re-parsing on every rerender) ──
-@st.cache_data(ttl=3600, show_spinner=False)
-def _cached_hdb_records():
-    from data.hdb_pipeline import fetch_hdb_resale
-    return fetch_hdb_resale()
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _cached_ura_transactions():
-    from data.ura_pipeline import load_all_transactions
-    return load_all_transactions()
-
 st.set_page_config(
     page_title="PropOS — Singapore Property Intelligence",
     page_icon="🏠",
@@ -204,6 +193,18 @@ st.set_page_config(
         ),
     },
 )
+
+# ── Cached data loaders — MUST be after set_page_config ──────────────────────
+# Streamlit caches in memory for 1 hr: avoids re-parsing 10MB JSON on every rerender
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_hdb_records():
+    from data.hdb_pipeline import fetch_hdb_resale
+    return fetch_hdb_resale()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_ura_transactions():
+    from data.ura_pipeline import load_all_transactions
+    return load_all_transactions()
 
 # ── Premium UI Theme ──────────────────────────────────────────────────────────
 st.markdown("""
@@ -785,10 +786,9 @@ if tab_select == "🏠 Address Lookup":
                     st.divider()
                     st.subheader(f"📊 {result['town']} {result['flat_type']} — Price & Implied Yield Trend")
                     st.caption("Price trend uses actual HDB resale transactions. Yield is implied: benchmark rent ÷ monthly median price.")
-                    from data.hdb_pipeline import fetch_hdb_resale as _fetch_resale
                     from collections import defaultdict as _dd
                     import pandas as _pd
-                    _all_records = _fetch_resale()
+                    _all_records = _cached_hdb_records()
                     _trend_records = [
                         r for r in _all_records
                         if r["town"] == result["town"]
@@ -1418,7 +1418,7 @@ elif tab_select == "🔍 Valuation":
         _scale = _RENT_SCALE.get(hm_flat, 1.0)
         _adj_rent = {t: round(r * _scale / 100) * 100 for t, r in _HM_RENT.items()}
 
-        records = fetch_hdb_resale()
+        records = _cached_hdb_records()
         all_months = sorted(set(r['month'] for r in records))
 
         # Time window control
@@ -3053,7 +3053,7 @@ elif tab_select == "⚖️ Compare":
         "*Compare up to 3 HDB or private properties side-by-side — valuation, yield, stamp duty and mortgage cost.*"
     )
 
-    from data.hdb_pipeline import fetch_hdb_resale, get_town_stats
+    from data.hdb_pipeline import get_town_stats
     from data.stamp_duty import full_stamp_duty
     _mort_agent = MortgageAgent()
     def calc_mortgage(price, loan, tenure, rate, cpf): return _mort_agent.calculate(price, loan, tenure, rate, cpf)
@@ -3068,8 +3068,7 @@ elif tab_select == "⚖️ Compare":
             st.subheader(f"Property {i+1}")
             p_type = st.selectbox("Type", ["HDB Resale", "Private Condo/Apt"], key=f"cmp_type_{i}")
             if p_type == "HDB Resale":
-                records_all = fetch_hdb_resale()
-                towns_cmp = sorted(set(r['town'] for r in records_all))
+                towns_cmp = sorted(set(r['town'] for r in _cached_hdb_records()))
                 p_town = st.selectbox("Town", towns_cmp, key=f"cmp_town_{i}",
                     index=towns_cmp.index("TAMPINES") if "TAMPINES" in towns_cmp else 0)
                 p_flat = st.selectbox("Flat Type", ["3 ROOM","4 ROOM","5 ROOM","EXECUTIVE"], key=f"cmp_flat_{i}")
@@ -3273,9 +3272,8 @@ elif tab_select == "🗺️ MRT Map":
             # ── Path B: project name → URA transaction cache ──────────────────
             if not _found_coords:
                 try:
-                    from data.ura_pipeline import load_all_transactions as _load_txns
                     from data.svy21 import svy21_to_wgs84
-                    _all_txns = _load_txns()
+                    _all_txns = _cached_ura_transactions()
                     _q_lower = _q.lower()
                     _matched = [t for t in _all_txns if _q_lower in t.get("project", "").lower()]
                     if _matched:
@@ -3489,9 +3487,8 @@ elif tab_select == "🗺️ MRT Map":
         # — Transaction heatmap overlay (with filters) -----------------------
         if show_txn:
             try:
-                from data.ura_pipeline import load_all_transactions as _load_heatmap_txns
                 from data.svy21 import svy21_to_wgs84
-                _all_txns = _load_heatmap_txns()
+                _all_txns = _cached_ura_transactions()
                 _heat_pts  = []
                 _txn_markers = []
                 _rad_m = radius_km * 1000
