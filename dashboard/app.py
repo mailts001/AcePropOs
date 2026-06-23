@@ -5502,8 +5502,60 @@ elif tab_select == "🎨 Marketing Studio":
 
     # ── Tab 2: Job Queue (admin approval) ─────────────────────────────────────
     with mk_tab2:
-        st.subheader("Job Queue")
         _mk_jobs = list_jobs()
+
+        # ── Summary counts ─────────────────────────────────────────────────────
+        _mk_counts = {}
+        for _mj0 in _mk_jobs:
+            _s0 = _mj0["status"]
+            _mk_counts[_s0] = _mk_counts.get(_s0, 0) + 1
+        _cnt_cols = st.columns(6)
+        for _ci, (_st0, _icon0) in enumerate([
+            ("pending","⏳"),("approved","✅"),("processing","⚙️"),
+            ("done","🎉"),("rejected","❌"),("failed","💥")
+        ]):
+            _cnt_cols[_ci].metric(_icon0 + " " + _st0.title(), _mk_counts.get(_st0, 0))
+
+        # ── Bulk-clear completed/rejected/failed ───────────────────────────────
+        _clearable = [j for j in _mk_jobs if j["status"] in ("rejected","failed","done")]
+        if _clearable:
+            st.divider()
+            _cl1, _cl2, _cl3 = st.columns(3)
+            if _cl1.button(f"🗑️ Clear {sum(1 for j in _clearable if j['status']=='rejected')} Rejected",
+                           key="clear_rejected", use_container_width=True):
+                from data.marketing_pipeline import update_job as _upj
+                import shutil as _sh
+                for _j in [j for j in _mk_jobs if j["status"] == "rejected"]:
+                    _upj({**_j}, None)          # re-save (no move needed)
+                    # delete files
+                    _rd = Path(_j.get("result_dir",""))
+                    if _rd.exists(): _sh.rmtree(_rd, ignore_errors=True)
+                    _ip = Path(_j.get("image_path",""))
+                    if _ip.exists(): _ip.unlink(missing_ok=True)
+                    Path(_MKT_BASE / "jobs" / "rejected" / f"{_j['job_id']}.json").unlink(missing_ok=True)
+                st.rerun()
+            if _cl2.button(f"🗑️ Clear {sum(1 for j in _clearable if j['status']=='failed')} Failed",
+                           key="clear_failed", use_container_width=True):
+                import shutil as _sh
+                for _j in [j for j in _mk_jobs if j["status"] == "failed"]:
+                    _rd = Path(_j.get("result_dir",""))
+                    if _rd.exists(): _sh.rmtree(_rd, ignore_errors=True)
+                    _ip = Path(_j.get("image_path",""))
+                    if _ip.exists(): _ip.unlink(missing_ok=True)
+                    Path(_MKT_BASE / "jobs" / "failed" / f"{_j['job_id']}.json").unlink(missing_ok=True)
+                st.rerun()
+            if _cl3.button(f"🗑️ Clear {sum(1 for j in _clearable if j['status']=='done')} Done",
+                           key="clear_done", use_container_width=True):
+                import shutil as _sh
+                for _j in [j for j in _mk_jobs if j["status"] == "done"]:
+                    _rd = Path(_j.get("result_dir",""))
+                    if _rd.exists(): _sh.rmtree(_rd, ignore_errors=True)
+                    _ip = Path(_j.get("image_path",""))
+                    if _ip.exists(): _ip.unlink(missing_ok=True)
+                    Path(_MKT_BASE / "jobs" / "done" / f"{_j['job_id']}.json").unlink(missing_ok=True)
+                st.rerun()
+
+        st.divider()
         if not _mk_jobs:
             st.info("No jobs yet. Upload a photo in the Upload tab.")
         else:
@@ -5522,7 +5574,7 @@ elif tab_select == "🎨 Marketing Studio":
                     f"{_status_icon} `{_mj_id}` — {_mj.get('user_label','')} "
                     f"[{_mj.get('property_type','')} / {_mj.get('style','')}] "
                     f"· {_mj_status.upper()}",
-                    expanded=(_mj_status == "pending")
+                    expanded=(_mj_status in ("pending", "processing"))
                 ):
                     _mj_c1, _mj_c2 = st.columns(2)
                     with _mj_c1:
@@ -5535,28 +5587,48 @@ elif tab_select == "🎨 Marketing Studio":
                     with _mj_c2:
                         st.write(f"**Status:** {_mj_status}")
                         st.write(f"**Created:** {time.strftime('%d %b %H:%M', time.localtime(_mj.get('created_at',0)))}")
+                        if _mj.get("approved_at"):
+                            st.write(f"**Approved:** {time.strftime('%d %b %H:%M', time.localtime(_mj['approved_at']))}")
+                        if _mj.get("completed_at"):
+                            st.write(f"**Completed:** {time.strftime('%d %b %H:%M', time.localtime(_mj['completed_at']))}")
                         if _mj.get("scene_analysis"):
                             _sa = _mj["scene_analysis"]
                             st.write(f"**Room:** {_sa.get('room_type','?')} | **Style:** {_sa.get('current_style','?')}")
                             st.write(f"**Lighting:** {_sa.get('lighting_quality','?')} | **Clutter:** {_sa.get('clutter_level','?')}")
+                        if _mj.get("worker_host"):
+                            st.caption(f"⚙️ Worker: {_mj['worker_host']}")
                         if _mj.get("error"):
                             st.error(f"Error: {_mj['error']}")
-                        if _mj.get("worker_host"):
-                            st.caption(f"Worker: {_mj['worker_host']}")
 
                     if _mj_status == "pending":
                         _app_col, _rej_col = st.columns(2)
                         if _app_col.button("✅ Approve", key=f"approve_{_mj_id}"):
                             approve_job(_mj_id)
-                            st.success("Approved — Mac worker will pick this up on next poll.")
+                            st.success("Approved — Mac worker picks up in ≤30s.")
                             st.rerun()
-                        if _rej_col.button("❌ Reject",  key=f"reject_{_mj_id}"):
+                        if _rej_col.button("❌ Reject", key=f"reject_{_mj_id}"):
                             reject_job(_mj_id)
-                            st.warning("Rejected.")
                             st.rerun()
 
-                    if _mj_status == "done" and _mj.get("outputs"):
-                        st.write(f"**{len(_mj['outputs'])} files ready** — see Download tab")
+                    if _mj_status == "processing":
+                        st.info("⚙️ Mac worker is processing this job now…")
+                        if st.button("🔄 Refresh", key=f"ref_{_mj_id}"):
+                            st.rerun()
+
+                    if _mj_status == "done":
+                        st.success(f"🎉 {len(_mj.get('outputs',[]))} files ready — see Download tab")
+
+                    # Individual delete for any terminal state
+                    if _mj_status in ("rejected", "failed", "done"):
+                        if st.button("🗑️ Remove this job", key=f"del_{_mj_id}",
+                                     help="Delete job record and files"):
+                            import shutil as _sh2
+                            _rd2 = Path(_mj.get("result_dir",""))
+                            if _rd2.exists(): _sh2.rmtree(_rd2, ignore_errors=True)
+                            _ip2 = Path(_mj.get("image_path",""))
+                            if _ip2.exists(): _ip2.unlink(missing_ok=True)
+                            Path(_MKT_BASE/"jobs"/_mj_status/f"{_mj_id}.json").unlink(missing_ok=True)
+                            st.rerun()
 
     # ── Tab 3: Download Results ────────────────────────────────────────────────
     with mk_tab3:
