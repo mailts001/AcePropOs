@@ -5610,6 +5610,24 @@ elif tab_select == "🎨 Marketing Studio":
                             reject_job(_mj_id)
                             st.rerun()
 
+                    if _mj_status == "approved":
+                        # Check if worker is online
+                        _hb2 = _MKT_BASE / "worker_heartbeat.json"
+                        _w_online = False
+                        try:
+                            _hb2_data = json.loads(_hb2.read_text())
+                            _w_online = (time.time() - _hb2_data.get("ts", 0)) < 120
+                        except Exception:
+                            pass
+                        if _w_online:
+                            st.success("🟢 Mac worker is online — job will start within 30 seconds. Refresh to see progress.")
+                        else:
+                            st.warning("⚠️ **Mac worker is not running.** To process this job, open Terminal on your Mac and run:")
+                            st.code("cd /Users/tslee/Documents/PropOS\nsource .venv/bin/activate\npython3 scripts/mac_worker.py", language="bash")
+                            st.caption("The worker picks up approved jobs automatically and sends you a Telegram notification when done. You can close Terminal after processing finishes.")
+                        if st.button("🔄 Refresh status", key=f"ref_ap_{_mj_id}"):
+                            st.rerun()
+
                     if _mj_status == "processing":
                         st.info("⚙️ Mac worker is processing this job now…")
                         if st.button("🔄 Refresh", key=f"ref_{_mj_id}"):

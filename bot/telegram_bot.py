@@ -675,12 +675,38 @@ async def button_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if action == "approve":
                 result = approve_job(job_id)
                 if result:
-                    await query.edit_message_text(
-                        f"✅ *Job approved!*\n`{job_id}`\n\n"
-                        f"Mac worker will process this automatically within 30 seconds.\n"
-                        f"You'll get a completion notification when done.",
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                    # Check if Mac worker is online (heartbeat < 2 min old)
+                    import time as _t
+                    from pathlib import Path as _P
+                    _hb = _P(__file__).parent.parent / "cache" / "marketing" / "worker_heartbeat.json"
+                    _worker_online = False
+                    try:
+                        import json as _j
+                        _hb_data = _j.loads(_hb.read_text())
+                        _worker_online = (_t.time() - _hb_data.get("ts", 0)) < 120
+                    except Exception:
+                        pass
+
+                    if _worker_online:
+                        _msg = (
+                            f"✅ *Job approved — processing started!*\n"
+                            f"`{job_id}`\n\n"
+                            f"🟢 Mac worker is online and will pick this up within 30 seconds.\n"
+                            f"You'll receive a completion notification when done."
+                        )
+                    else:
+                        _msg = (
+                            f"✅ *Job approved!*\n"
+                            f"`{job_id}`\n\n"
+                            f"⚠️ *Mac worker is not running.*\n"
+                            f"Open Terminal on your Mac and run:\n\n"
+                            f"`cd /Users/tslee/Documents/PropOS`\n"
+                            f"`source .venv/bin/activate`\n"
+                            f"`python3 scripts/mac_worker.py`\n\n"
+                            f"It will pick up this job automatically and notify you when done.\n"
+                            f"_(You can close Terminal once processing finishes)_"
+                        )
+                    await query.edit_message_text(_msg, parse_mode=ParseMode.MARKDOWN)
                 else:
                     await query.answer("Job not found or already processed.", show_alert=True)
             else:
