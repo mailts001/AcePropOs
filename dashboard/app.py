@@ -247,7 +247,11 @@ def _show_rental_intel(district: int, est_val_sgd: int = 0):
             else:
                 st.info("No rental breakdown by bedroom type available for this district.")
         else:
-            st.info("URA rental data not yet cached — run `sync_ura.py` on the VPS to populate.")
+            import os as _os
+            if _os.environ.get("URA_ACCESS_KEY"):
+                st.info("⏳ Fetching rental data for the first time — this takes ~10 seconds and will be cached for 7 days.")
+            else:
+                st.info("💡 **One-time setup:** Run this on the VPS to unlock rental data (caches for 7 days, auto-refreshes weekly):\n```\ncd /root/propos && .venv/bin/python scripts/sync_ura.py\n```\nAfter the first run, rental data loads automatically with no manual steps.")
     except Exception as _rle:
         st.caption(f"Rental data unavailable: {_rle}")
 

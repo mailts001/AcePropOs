@@ -120,8 +120,12 @@ def get_district_rental_stats(district: int | str) -> dict:
     """
     Summarise rental market for a district: median by bedroom count,
     estimated gross yield range (requires private transaction prices).
+    Auto-fetches from URA API if cache is missing and URA_ACCESS_KEY is set.
     """
-    medians = fetch_rental_medians()
+    try:
+        medians = fetch_rental_medians()  # uses 7-day cache; fetches if key set
+    except Exception:
+        medians = []
     district = str(district).zfill(2)
     district_data = [m for m in medians if str(m.get("district", "")).zfill(2) == district]
 
