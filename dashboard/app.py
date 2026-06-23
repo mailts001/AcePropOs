@@ -1432,6 +1432,21 @@ elif tab_select == "🔍 Valuation":
                             "Sub-letting requires HDB approval. Benchmark from SRX — actual rent "
                             "varies by floor, renovation and proximity to MRT."
                         )
+                        # ── Floor-tier rent comparables ───────────────────────
+                        import pandas as _hpd
+                        _floor_tiers = [
+                            {"Floor Range": "Low  (01–05)", "Condition": "Basic",     "Est. Rent/mo": f"${round(_post_rent_val*0.91/100)*100:,}", "vs Median": "−9%",  "Notes": "Ground floor, no direct lift access"},
+                            {"Floor Range": "Mid  (06–12)", "Condition": "Average",   "Est. Rent/mo": f"${round(_post_rent_val*1.00/100)*100:,}", "vs Median": "Median","Notes": "Typical — cross-ventilation, reasonable views"},
+                            {"Floor Range": "High (13–20)", "Condition": "Renovated", "Est. Rent/mo": f"${round(_post_rent_val*1.09/100)*100:,}", "vs Median": "+9%",  "Notes": "Higher floor premium — better breeze & light"},
+                            {"Floor Range": "Top  (21+)",  "Condition": "Renovated", "Est. Rent/mo": f"${round(_post_rent_val*1.15/100)*100:,}", "vs Median": "+15%", "Notes": "Penultimate/top — scenic views command premium"},
+                        ]
+                        st.caption("📋 Estimated rent by floor tier — derived from SRX median benchmark:")
+                        st.dataframe(_hpd.DataFrame(_floor_tiers), hide_index=True, use_container_width=True)
+                        st.caption(
+                            "⚠️ HDB does not publish individual rental transaction records. "
+                            "Floor premiums are estimates based on market norms (±5%). "
+                            "For verified rents, check SRX, 99.co or PropertyGuru listings."
+                        )
                     else:
                         st.info(f"No rental benchmark available for {_post_town}.")
                 else:
@@ -1611,10 +1626,20 @@ elif tab_select == "🔍 Valuation":
                         f"Sub-letting requires HDB approval. Benchmark is SRX median — actual "
                         f"rent varies by floor, renovation, proximity to MRT."
                     )
-                    # All flat types for this town for comparison
+                    # ── Floor-tier rent comparables ───────────────────────────
+                    import pandas as _hdbrentpd
+                    _hdb_floor_rows = [
+                        {"Floor Range": "Low  (01–05)", "Condition": "Basic",     "Est. Rent/mo": f"${round(_hdb_rent_val*0.91/100)*100:,}", "vs Median": "−9%",   "Notes": "Ground floor, no direct lift access"},
+                        {"Floor Range": "Mid  (06–12)", "Condition": "Average",   "Est. Rent/mo": f"${round(_hdb_rent_val*1.00/100)*100:,}", "vs Median": "Median","Notes": "Typical — cross-ventilation, reasonable views"},
+                        {"Floor Range": "High (13–20)", "Condition": "Renovated", "Est. Rent/mo": f"${round(_hdb_rent_val*1.09/100)*100:,}", "vs Median": "+9%",   "Notes": "Higher floor premium — better breeze & light"},
+                        {"Floor Range": "Top  (21+)",  "Condition": "Renovated", "Est. Rent/mo": f"${round(_hdb_rent_val*1.15/100)*100:,}", "vs Median": "+15%",  "Notes": "Top floor — scenic views command premium"},
+                    ]
+                    st.caption("📋 Estimated rent by floor tier (derived from SRX median):")
+                    st.dataframe(_hdbrentpd.DataFrame(_hdb_floor_rows), hide_index=True, use_container_width=True)
+
+                    # ── All flat types for this town ──────────────────────────
                     _all_ft_rents = _hdb_rent
                     if len(_all_ft_rents) > 1:
-                        import pandas as _hdbrentpd
                         _hdb_rent_rows = []
                         for _ft_r, _rent_r in sorted(_all_ft_rents.items()):
                             _gy_r = round(_rent_r * 12 / _latest_price * 100, 2) if _latest_price else 0
@@ -1624,8 +1649,14 @@ elif tab_select == "🔍 Valuation":
                                 "Annual Income": f"${_rent_r*12:,}",
                                 "Est. Gross Yield": f"{_gy_r:.2f}%" if _gy_r else "—",
                             })
-                        st.caption("Rental benchmarks by flat type in this town:")
+                        st.caption("Benchmarks by flat type in this town:")
                         st.dataframe(_hdbrentpd.DataFrame(_hdb_rent_rows), hide_index=True, use_container_width=True)
+
+                    st.caption(
+                        "⚠️ HDB does not publish individual rental transaction records. "
+                        "Floor premiums are estimates based on market norms (±5%). "
+                        "For verified rents, check SRX, 99.co or PropertyGuru listings."
+                    )
                 else:
                     st.info(f"No rental benchmark available for {_trend_town}.")
             else:
