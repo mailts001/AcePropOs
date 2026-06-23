@@ -159,6 +159,8 @@ def _gradient_html(df, col_cmaps: dict, fmt: dict | None = None) -> str:
     return table
 
 
+import requests as _requests_lib  # available globally throughout app
+
 from agents.valuation_agent import ValuationAgent
 from agents.deal_hunter_agent import DealHunterAgent
 from agents.news_intel_agent import NewsIntelAgent
@@ -168,6 +170,17 @@ from data.watchlist import (init_watchlist_db, add_watch, list_watches,
                              delete_watch, check_watchlist, format_alert_message)
 from core.llm_router import save_mode, get_current_mode, get_token_summary
 from data.news_pipeline import get_sentiment_index
+
+# ── Cached data loaders (Streamlit caches for 1 hour — avoids re-parsing on every rerender) ──
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_hdb_records():
+    from data.hdb_pipeline import fetch_hdb_resale
+    return fetch_hdb_resale()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_ura_transactions():
+    from data.ura_pipeline import load_all_transactions
+    return load_all_transactions()
 
 st.set_page_config(
     page_title="PropOS — Singapore Property Intelligence",
@@ -613,17 +626,43 @@ if tab_select == "🏠 Address Lookup":
 
     if prop_category == "HDB Flat":
         st.subheader("HDB Address Lookup")
-        st.info("Enter the block number and street name as shown on your flat's address. Example: Block **123A**, Street **TAMPINES ST 11**")
 
-        col1, col2, col3 = st.columns([1, 3, 2])
-        with col1:
-            block = st.text_input("Block No.", placeholder="e.g. 123A")
-        with col2:
-            street = st.text_input("Street Name", placeholder="e.g. TAMPINES ST 11")
-        with col3:
-            flat_type_filter = st.selectbox("Flat Type (optional)", ["Any", "2 ROOM", "3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE"])
+        # ── Input method: postal code OR block+street ─────────────────────────
+        _addr_mode = st.radio("Enter by", ["🏠 Block & Street", "📮 Postal Code"], horizontal=True, key="addr_input_mode")
 
-        asking = st.number_input("Asking Price (SGD, 0 = history only)", 0, 2000000, 0, step=5000)
+        if _addr_mode == "📮 Postal Code":
+            _addr_postal = st.text_input("Postal Code (6 digits)", max_chars=6, placeholder="e.g. 520320", key="addr_postal")
+            block, street = "", ""
+            if _addr_postal and len(_addr_postal) == 6 and _addr_postal.isdigit():
+                try:
+                    _om_a = _requests_lib.get(
+                        "https://www.onemap.gov.sg/api/common/elastic/search"
+                        f"?searchVal={_addr_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
+                        timeout=6
+                    ).json()
+                    _om_ar = (_om_a.get("results") or [{}])[0]
+                    block  = (_om_ar.get("BLK_NO","") or "").strip()
+                    street = (_om_ar.get("ROAD_NAME","") or "").strip()
+                    if block and street:
+                        st.success(f"📍 Resolved: **Block {block}, {street}**")
+                    else:
+                        st.warning("Could not resolve postal code. Enter block & street manually.")
+                except Exception as _ae:
+                    st.warning(f"Postal lookup error: {_ae}")
+        else:
+            st.info("Enter block number and street name as shown on your flat's address.")
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                block = st.text_input("Block No.", placeholder="e.g. 123A")
+            with col2:
+                street = st.text_input("Street Name", placeholder="e.g. TAMPINES ST 11")
+
+        col_ft, col_ask = st.columns(2)
+        with col_ft:
+            flat_type_filter = st.selectbox("Flat Type", ["4 ROOM", "3 ROOM", "5 ROOM", "EXECUTIVE", "2 ROOM", "Any"],
+                                            help="Filter transactions to this flat type only")
+        with col_ask:
+            asking = st.number_input("Asking Price (SGD, 0 = history only)", 0, 2000000, 0, step=5000)
         explain_toggle = st.checkbox("Generate AI analysis", value=True)
 
         if st.button("🔍 Look Up Address", type="primary"):
@@ -673,11 +712,25 @@ if tab_select == "🏠 Address Lookup":
 
                     # Transaction history table
                     st.divider()
-                    st.subheader("Transaction History (this block)")
+                    _ftype_label = flat_type_filter if flat_type_filter != "Any" else "All Types"
+                    st.subheader(f"📋 Transaction History — Block {block} {street} ({_ftype_label})")
                     txns = result.get("recent_transactions", [])
                     if txns:
+                        import pandas as _txn_pd
+                        _txn_rows = []
                         for t in txns:
-                            st.write(f"**{t['month']}** — ${t['resale_price']:,.0f} | PSF ${t['psf_sgd']:,.0f} | {t['storey_range']} | {t['floor_area_sqft']:.0f} sqft")
+                            _txn_rows.append({
+                                "Month":       t.get("month",""),
+                                "Flat Type":   t.get("flat_type",""),
+                                "Storey":      t.get("storey_range",""),
+                                "Area (sqft)": int(t.get("floor_area_sqft", 0) or 0),
+                                "Price (SGD)": f"${t.get('resale_price',0):,.0f}",
+                                "PSF":         f"${t.get('psf_sgd',0):,.0f}",
+                                "Lease Rem.":  t.get("remaining_lease",""),
+                            })
+                        st.dataframe(_txn_pd.DataFrame(_txn_rows), hide_index=True, use_container_width=True)
+                        if flat_type_filter != "Any":
+                            st.caption(f"✅ All {len(txns)} transactions above are filtered to **{flat_type_filter}** only at Block {block} {street}.")
 
                     # Rental yield estimate
                     st.divider()
@@ -710,10 +763,11 @@ if tab_select == "🏠 Address Lookup":
                         "YISHUN": {"3 ROOM": 2000, "4 ROOM": 2500, "5 ROOM": 2900},
                     }
                     _town_rents = _HDB_TOWN_RENT.get(result["town"], {})
-                    # Determine flat type key
-                    _ft = result["flat_type"].upper()
+                    # Use user-selected flat type for rent estimate (fallback to result flat_type)
+                    _sel_ft = flat_type_filter if flat_type_filter != "Any" else result.get("flat_type","4 ROOM")
+                    _ft = _sel_ft.upper()
                     _rent_key = "5 ROOM" if "EXEC" in _ft or "5" in _ft else ("3 ROOM" if "3" in _ft or "2" in _ft else "4 ROOM")
-                    _est_rent = _town_rents.get(_rent_key, _town_rents.get("4 ROOM", 0))
+                    _est_rent = _town_rents.get(_rent_key, _town_rents.get(_sel_ft, _town_rents.get("4 ROOM", 0)))
                     _ref_price = result["address_median_price"] or result["latest_transacted_price"]
                     if _est_rent and _ref_price:
                         _gross_yield = round(_est_rent * 12 / _ref_price * 100, 2)
@@ -932,8 +986,7 @@ elif tab_select == "🔍 Valuation":
     val_type = st.radio("Property type", ["🏠 HDB Resale", "🏢 Private Condo/Apt", "📊 Market Heatmap"], horizontal=True)
 
     if val_type == "🏠 HDB Resale":
-        from data.hdb_pipeline import fetch_hdb_resale
-        records = fetch_hdb_resale()
+        records = _cached_hdb_records()
         towns_available = sorted(set(r['town'] for r in records))
 
         # ── Input method: postal code OR town picker ──────────────────────────
@@ -951,7 +1004,7 @@ elif tab_select == "🔍 Valuation":
             _val_postal_town = None
             if _val_postal and len(_val_postal) == 6 and _val_postal.isdigit():
                 try:
-                    _om_val = requests.get(
+                    _om_val = _requests_lib.get(
                         "https://www.onemap.gov.sg/api/common/elastic/search"
                         f"?searchVal={_val_postal}&returnGeom=N&getAddrDetails=Y&pageNum=1",
                         timeout=6
@@ -4490,7 +4543,7 @@ elif tab_select == "📈 Price History":
                     _ph_search_term_orig = _ph_search_term
                     if _ph_search_term.isdigit() and len(_ph_search_term) == 6:
                         try:
-                            _om = requests.get(
+                            _om = _requests_lib.get(
                                 "https://www.onemap.gov.sg/api/common/elastic/search"
                                 f"?searchVal={_ph_search_term}&returnGeom=N&getAddrDetails=Y&pageNum=1",
                                 timeout=6
