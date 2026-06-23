@@ -222,6 +222,7 @@ def process_job(job: dict, dry_run: bool = False) -> bool:
 
 
 def main():
+    global VPS_HOST, VPS_KEY   # must be first — before any use of these names
     parser = argparse.ArgumentParser(description="PropOS Mac Worker")
     parser.add_argument("--vps",      default=VPS_HOST,  help="VPS SSH target")
     parser.add_argument("--key",      default=VPS_KEY,   help="SSH key path")
@@ -229,7 +230,6 @@ def main():
     parser.add_argument("--dry-run",  action="store_true", help="Download+analyse only, no pipeline")
     args = parser.parse_args()
 
-    global VPS_HOST, VPS_KEY
     VPS_HOST = args.vps
     VPS_KEY  = args.key
 
