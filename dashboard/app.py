@@ -236,16 +236,30 @@ def _show_rental_intel(district: int, est_val_sgd: int = 0, area_sqft: int = 100
             _gy  = round(_med * 12 / est_val_sgd * 100, 2) if est_val_sgd and _med else 0
             _ny  = round(_gy - 1.5, 2) if _gy else 0
 
-            st.caption(f"URA project-level median rental PSF · {_q} · {_rs.get('project_count',0)} projects in D{district}")
+            st.caption(f"URA median rental PSF · {_q} · {_rs.get('project_count',0)} projects in D{district}")
             rc1, rc2, rc3, rc4 = st.columns(4)
-            rc1.metric("Median Rent/mo",   f"${_med:,.0f}", help=f"Based on {area_sqft:,} sqft × median PSF ${_rs.get('median_psf',0):.2f}/sqft/mo")
+            rc1.metric("Median Rent/mo",   f"${_med:,.0f}",
+                       help=f"{area_sqft:,} sqft × ${_rs.get('median_psf',0):.2f} PSF/mo")
             rc2.metric("Range (P25–P75)",  f"${_p25:,.0f} – ${_p75:,.0f}")
             rc3.metric("Est. Gross Yield", f"{_gy:.2f}%" if _gy else "—")
-            rc4.metric("Est. Net Yield",   f"{_ny:.2f}%" if _ny else "—", help="~1.5% deducted for maintenance, vacancy, property tax")
+            rc4.metric("Est. Net Yield",   f"{_ny:.2f}%" if _ny else "—",
+                       help="After ~1.5% p.a. for maintenance, vacancy, property tax")
 
-            if _rs.get("sample_projects"):
-                st.caption("Sample projects: " + " · ".join(_rs["sample_projects"]))
-            st.caption("Rental yield calculated against your estimated/asking value. Actual yield varies by unit size, floor and furnishing.")
+            # Per-project rental records table
+            _proj_rows = _rs.get("project_rows", [])
+            if _proj_rows:
+                import pandas as _rentpd
+                st.caption(f"↓ Rental by project — {_q}, sorted highest PSF first")
+                _rent_df = _rentpd.DataFrame([{
+                    "Project":          r["project"],
+                    "Street":           r["street"],
+                    "Median PSF/mo":    f"${r['median_psf']:.2f}",
+                    f"Est Rent ({area_sqft:,}sqft)": f"${r['med_rent']:,.0f}",
+                    "P25 PSF":          f"${r['psf25']:.2f}",
+                    "P75 PSF":          f"${r['psf75']:.2f}",
+                } for r in _proj_rows])
+                st.dataframe(_rent_df, hide_index=True, use_container_width=True)
+            st.caption("Yield vs estimated/asking value. Actual yield varies by unit size, floor and furnishing.")
         else:
             st.info(
                 "📋 **Rental data not yet cached.** Run once on the VPS "
@@ -1518,6 +1532,47 @@ elif tab_select == "🔍 Valuation":
                     st.caption(f"{len(_rrecs)} most recent {_trend_ft} transactions in {_trend_town}, newest first.")
                 else:
                     st.info(f"No recent transactions found for {_trend_ft} in {_trend_town}.")
+
+                # ── HDB Rental Benchmark ──────────────────────────────────────
+                st.divider()
+                st.subheader(f"🏘️ Rental Market — {_trend_town} {_trend_ft}")
+                _hdb_rent = _VAL_TOWN_RENT.get(_trend_town.upper(), {})
+                _hdb_rent_val = _hdb_rent.get(_ft_key2, 0)
+                if _hdb_rent_val:
+                    _latest_price = _tprices[-1] if _tprices else 0
+                    _hdb_gross_y  = round(_hdb_rent_val * 12 / _latest_price * 100, 2) if _latest_price else 0
+                    _hdb_net_y    = round(_hdb_gross_y - 0.8, 2) if _hdb_gross_y else 0
+                    hrc1, hrc2, hrc3, hrc4 = st.columns(4)
+                    hrc1.metric("Est. Monthly Rent",  f"${_hdb_rent_val:,}",
+                                help="SRX 2024–25 median benchmark for this flat type and town")
+                    hrc2.metric("Rent Range",         f"${round(_hdb_rent_val*0.88/100)*100:,} – ${round(_hdb_rent_val*1.12/100)*100:,}",
+                                help="±12% for floor, condition and MRT proximity")
+                    hrc3.metric("Est. Gross Yield",   f"{_hdb_gross_y:.2f}%" if _hdb_gross_y else "—",
+                                help="vs latest median resale price in this town")
+                    hrc4.metric("Est. Net Yield",     f"{_hdb_net_y:.2f}%" if _hdb_net_y else "—",
+                                help="After ~0.8% p.a. for maintenance and vacancy (HDB lower costs than private)")
+                    st.caption(
+                        f"HDB rental: MOP (5 years) must be met before renting entire flat. "
+                        f"Sub-letting requires HDB approval. Benchmark is SRX median — actual "
+                        f"rent varies by floor, renovation, proximity to MRT."
+                    )
+                    # All flat types for this town for comparison
+                    _all_ft_rents = _hdb_rent
+                    if len(_all_ft_rents) > 1:
+                        import pandas as _hdbrentpd
+                        _hdb_rent_rows = []
+                        for _ft_r, _rent_r in sorted(_all_ft_rents.items()):
+                            _gy_r = round(_rent_r * 12 / _latest_price * 100, 2) if _latest_price else 0
+                            _hdb_rent_rows.append({
+                                "Flat Type": _ft_r,
+                                "Est. Monthly Rent": f"${_rent_r:,}",
+                                "Annual Income": f"${_rent_r*12:,}",
+                                "Est. Gross Yield": f"{_gy_r:.2f}%" if _gy_r else "—",
+                            })
+                        st.caption("Rental benchmarks by flat type in this town:")
+                        st.dataframe(_hdbrentpd.DataFrame(_hdb_rent_rows), hide_index=True, use_container_width=True)
+                else:
+                    st.info(f"No rental benchmark available for {_trend_town}.")
             else:
                 st.info(f"No transaction records for **{_trend_ft}** in **{_trend_town}**.")
 

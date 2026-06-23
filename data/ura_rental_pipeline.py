@@ -170,22 +170,30 @@ def get_district_rental_stats(district: int | str, area_sqft: float = 1000) -> d
     p25_rent = round(p25_psf * area_sqft / 100) * 100
     p75_rent = round(p75_psf * area_sqft / 100) * 100
 
-    # Sample projects for context
-    projects = sorted(set(r.get("project","") for r in latest if r.get("project")))[:5]
+    # Per-project breakdown sorted by median PSF descending
+    project_rows = sorted(
+        [{"project": r.get("project",""), "street": r.get("street",""),
+          "median_psf": r.get("median_psf") or 0,
+          "psf25": r.get("psf25") or 0, "psf75": r.get("psf75") or 0,
+          "med_rent": round((r.get("median_psf") or 0) * area_sqft / 100) * 100,
+         } for r in latest if r.get("project") and r.get("median_psf")],
+        key=lambda x: x["median_psf"], reverse=True
+    )
 
     return {
-        "district":      district,
+        "district":       district,
         "latest_quarter": latest_q,
-        "median_psf":    med_psf,
-        "p25_psf":       p25_psf,
-        "p75_psf":       p75_psf,
-        "med_rent_sgd":  med_rent,
-        "p25_rent_sgd":  p25_rent,
-        "p75_rent_sgd":  p75_rent,
-        "area_sqft":     area_sqft,
-        "sample_projects": projects,
-        "project_count": len(latest),
-        "status":        "ok",
+        "median_psf":     med_psf,
+        "p25_psf":        p25_psf,
+        "p75_psf":        p75_psf,
+        "med_rent_sgd":   med_rent,
+        "p25_rent_sgd":   p25_rent,
+        "p75_rent_sgd":   p75_rent,
+        "area_sqft":      area_sqft,
+        "project_count":  len(latest),
+        "project_rows":   project_rows,        # per-project table
+        "sample_projects": [r["project"] for r in project_rows[:5]],
+        "status":         "ok",
     }
 
 
