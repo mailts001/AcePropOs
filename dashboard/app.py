@@ -736,51 +736,114 @@ if tab_select == "🏠 Address Lookup":
                     # Rental yield estimate
                     st.divider()
                     st.subheader("📈 Estimated Rental Yield")
-                    _HDB_TOWN_RENT = {
-                        "ANG MO KIO": {"3 ROOM": 2300, "4 ROOM": 2800, "5 ROOM": 3200},
-                        "BEDOK": {"3 ROOM": 2200, "4 ROOM": 2700, "5 ROOM": 3100},
-                        "BISHAN": {"3 ROOM": 2400, "4 ROOM": 3000, "5 ROOM": 3400},
-                        "BUKIT BATOK": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "BUKIT MERAH": {"3 ROOM": 2600, "4 ROOM": 3200, "5 ROOM": 3700},
-                        "BUKIT PANJANG": {"3 ROOM": 2000, "4 ROOM": 2500, "5 ROOM": 2900},
-                        "CENTRAL AREA": {"3 ROOM": 3200, "4 ROOM": 4200, "5 ROOM": 5000},
-                        "CHOA CHU KANG": {"3 ROOM": 2000, "4 ROOM": 2500, "5 ROOM": 2900},
-                        "CLEMENTI": {"3 ROOM": 2400, "4 ROOM": 2900, "5 ROOM": 3400},
-                        "GEYLANG": {"3 ROOM": 2200, "4 ROOM": 2800, "5 ROOM": 3200},
-                        "HOUGANG": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "JURONG EAST": {"3 ROOM": 2200, "4 ROOM": 2700, "5 ROOM": 3100},
-                        "JURONG WEST": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "KALLANG/WHAMPOA": {"3 ROOM": 2500, "4 ROOM": 3100, "5 ROOM": 3600},
-                        "MARINE PARADE": {"3 ROOM": 2600, "4 ROOM": 3200, "5 ROOM": 3700},
-                        "PASIR RIS": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "PUNGGOL": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "QUEENSTOWN": {"3 ROOM": 2700, "4 ROOM": 3400, "5 ROOM": 3900},
-                        "SEMBAWANG": {"3 ROOM": 1900, "4 ROOM": 2400, "5 ROOM": 2800},
-                        "SENGKANG": {"3 ROOM": 2100, "4 ROOM": 2600, "5 ROOM": 3000},
-                        "SERANGOON": {"3 ROOM": 2300, "4 ROOM": 2900, "5 ROOM": 3300},
-                        "TAMPINES": {"3 ROOM": 2200, "4 ROOM": 2700, "5 ROOM": 3100},
-                        "TOA PAYOH": {"3 ROOM": 2400, "4 ROOM": 3000, "5 ROOM": 3500},
-                        "WOODLANDS": {"3 ROOM": 1900, "4 ROOM": 2400, "5 ROOM": 2800},
-                        "YISHUN": {"3 ROOM": 2000, "4 ROOM": 2500, "5 ROOM": 2900},
+                    # Full benchmark table: 2 ROOM through EXECUTIVE for all towns
+                    _HDB_TOWN_RENT_FULL = {
+                        "ANG MO KIO":     {"2 ROOM":1400,"3 ROOM":2300,"4 ROOM":2800,"5 ROOM":3200,"EXECUTIVE":3500},
+                        "BEDOK":          {"2 ROOM":1350,"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "BISHAN":         {"2 ROOM":1500,"3 ROOM":2400,"4 ROOM":3000,"5 ROOM":3400,"EXECUTIVE":3700},
+                        "BUKIT BATOK":    {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "BUKIT MERAH":    {"2 ROOM":1700,"3 ROOM":2600,"4 ROOM":3200,"5 ROOM":3700,"EXECUTIVE":4000},
+                        "BUKIT PANJANG":  {"2 ROOM":1250,"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                        "CENTRAL AREA":   {"2 ROOM":2200,"3 ROOM":3200,"4 ROOM":4200,"5 ROOM":5000,"EXECUTIVE":5500},
+                        "CHOA CHU KANG":  {"2 ROOM":1250,"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
+                        "CLEMENTI":       {"2 ROOM":1500,"3 ROOM":2400,"4 ROOM":2900,"5 ROOM":3400,"EXECUTIVE":3700},
+                        "GEYLANG":        {"2 ROOM":1500,"3 ROOM":2200,"4 ROOM":2800,"5 ROOM":3200,"EXECUTIVE":3500},
+                        "HOUGANG":        {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "JURONG EAST":    {"2 ROOM":1350,"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "JURONG WEST":    {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "KALLANG/WHAMPOA":{"2 ROOM":1600,"3 ROOM":2500,"4 ROOM":3100,"5 ROOM":3600,"EXECUTIVE":3900},
+                        "MARINE PARADE":  {"2 ROOM":1700,"3 ROOM":2600,"4 ROOM":3200,"5 ROOM":3700,"EXECUTIVE":4000},
+                        "PASIR RIS":      {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "PUNGGOL":        {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "QUEENSTOWN":     {"2 ROOM":1800,"3 ROOM":2700,"4 ROOM":3400,"5 ROOM":3900,"EXECUTIVE":4200},
+                        "SEMBAWANG":      {"2 ROOM":1200,"3 ROOM":1900,"4 ROOM":2400,"5 ROOM":2800,"EXECUTIVE":3100},
+                        "SENGKANG":       {"2 ROOM":1300,"3 ROOM":2100,"4 ROOM":2600,"5 ROOM":3000,"EXECUTIVE":3300},
+                        "SERANGOON":      {"2 ROOM":1450,"3 ROOM":2300,"4 ROOM":2900,"5 ROOM":3300,"EXECUTIVE":3600},
+                        "TAMPINES":       {"2 ROOM":1350,"3 ROOM":2200,"4 ROOM":2700,"5 ROOM":3100,"EXECUTIVE":3400},
+                        "TOA PAYOH":      {"2 ROOM":1600,"3 ROOM":2400,"4 ROOM":3000,"5 ROOM":3500,"EXECUTIVE":3800},
+                        "WOODLANDS":      {"2 ROOM":1200,"3 ROOM":1900,"4 ROOM":2400,"5 ROOM":2800,"EXECUTIVE":3100},
+                        "YISHUN":         {"2 ROOM":1250,"3 ROOM":2000,"4 ROOM":2500,"5 ROOM":2900,"EXECUTIVE":3200},
                     }
-                    _town_rents = _HDB_TOWN_RENT.get(result["town"], {})
-                    # Use user-selected flat type for rent estimate (fallback to result flat_type)
-                    _sel_ft = flat_type_filter if flat_type_filter != "Any" else result.get("flat_type","4 ROOM")
-                    _ft = _sel_ft.upper()
-                    _rent_key = "5 ROOM" if "EXEC" in _ft or "5" in _ft else ("3 ROOM" if "3" in _ft or "2" in _ft else "4 ROOM")
-                    _est_rent = _town_rents.get(_rent_key, _town_rents.get(_sel_ft, _town_rents.get("4 ROOM", 0)))
-                    _ref_price = result["address_median_price"] or result["latest_transacted_price"]
-                    if _est_rent and _ref_price:
-                        _gross_yield = round(_est_rent * 12 / _ref_price * 100, 2)
-                        _net_yield = round(_gross_yield - 1.2, 2)
-                        rc1, rc2, rc3, rc4 = st.columns(4)
-                        rc1.metric("Est. Monthly Rent", f"${_est_rent:,}/mo", help=f"Town benchmark for {_rent_key} in {result['town']}")
-                        rc2.metric("Annual Rental Income", f"${_est_rent*12:,}")
-                        rc3.metric("Gross Yield", f"{_gross_yield}%")
-                        rc4.metric("Net Yield (est.)", f"{_net_yield}%", help="After ~1.2% for maintenance, tax, vacancy")
-                        st.caption(f"Based on {result['town']} town median rent for {_rent_key}. Actual rental depends on floor, condition, and MRT proximity. HDB Minimum Occupation Period (MOP) must be satisfied before renting.")
+                    _res_town = result.get("town","")
+                    _town_rents_full = _HDB_TOWN_RENT_FULL.get(_res_town, {})
+                    _ref_price = result.get("address_median_price") or result.get("latest_transacted_price", 0)
+
+                    # What flat types actually exist in this block?
+                    _block_txns = result.get("recent_transactions", [])
+                    _block_ftypes = sorted(set(
+                        t.get("flat_type","").strip().upper()
+                        for t in _block_txns if t.get("flat_type","").strip()
+                    ))
+
+                    # User-selected flat type takes priority; else derive from block records
+                    _sel_ft = flat_type_filter if flat_type_filter != "Any" else (
+                        result.get("flat_type","4 ROOM") or "4 ROOM"
+                    )
+                    # Normalise to our benchmark key
+                    _ft_upper = _sel_ft.upper()
+                    if "EXEC" in _ft_upper:
+                        _rent_key = "EXECUTIVE"
+                    elif "5" in _ft_upper:
+                        _rent_key = "5 ROOM"
+                    elif "4" in _ft_upper:
+                        _rent_key = "4 ROOM"
+                    elif "3" in _ft_upper:
+                        _rent_key = "3 ROOM"
+                    elif "2" in _ft_upper:
+                        _rent_key = "2 ROOM"
                     else:
-                        st.caption("Rental benchmark not available for this town/flat type.")
+                        _rent_key = "4 ROOM"
+
+                    _est_rent = _town_rents_full.get(_rent_key, 0)
+
+                    # Flat-type mismatch warning: if block has different types, flag it
+                    if _block_ftypes and _rent_key not in _block_ftypes:
+                        _ftype_note = f"⚠️ Block records show **{', '.join(_block_ftypes)}** — you selected **{_rent_key}**. Showing benchmark for your selection."
+                        st.warning(_ftype_note)
+                    elif _block_ftypes:
+                        st.caption(f"✅ Block has **{', '.join(_block_ftypes)}** transactions — rental estimate is for **{_rent_key}**.")
+
+                    if _est_rent and _ref_price:
+                        # Rental range: ±12% around benchmark (low floor / high premium)
+                        _rent_low  = round(_est_rent * 0.88 / 100) * 100
+                        _rent_high = round(_est_rent * 1.12 / 100) * 100
+                        _gross_yield     = round(_est_rent * 12 / _ref_price * 100, 2)
+                        _gross_yield_low = round(_rent_low  * 12 / _ref_price * 100, 2)
+                        _gross_yield_hi  = round(_rent_high * 12 / _ref_price * 100, 2)
+                        _net_yield  = round(_gross_yield - 1.2, 2)
+
+                        ra, rb, rc, rd = st.columns(4)
+                        ra.metric(f"Est. Rent ({_rent_key})",  f"${_est_rent:,}/mo",
+                                  help=f"SRX 2024–25 median for {_rent_key} in {_res_town}")
+                        rb.metric("Rental Range",              f"${_rent_low:,}–${_rent_high:,}/mo",
+                                  help="±12% around median (low floor vs high premium/renovated)")
+                        rc.metric("Gross Yield",               f"{_gross_yield}%",
+                                  help=f"Range: {_gross_yield_low}%–{_gross_yield_hi}%")
+                        rd.metric("Net Yield (est.)",          f"{_net_yield}%",
+                                  help="After ~1.2% for tax, maintenance, vacancy, agent")
+
+                        # Breakdown table: all flat types in this town
+                        if _town_rents_full:
+                            import pandas as _ry_pd
+                            _ry_rows = []
+                            for _k, _r in sorted(_town_rents_full.items(),
+                                                  key=lambda x: ["2 ROOM","3 ROOM","4 ROOM","5 ROOM","EXECUTIVE"].index(x[0]) if x[0] in ["2 ROOM","3 ROOM","4 ROOM","5 ROOM","EXECUTIVE"] else 99):
+                                _gy = round(_r * 12 / _ref_price * 100, 2) if _ref_price else 0
+                                _is_sel = "← your type" if _k == _rent_key else ""
+                                _ry_rows.append({"Flat Type": f"{_k} {_is_sel}",
+                                                 "Benchmark Rent/mo": f"${_r:,}",
+                                                 "Rent Range": f"${round(_r*.88/100)*100:,}–${round(_r*1.12/100)*100:,}",
+                                                 "Gross Yield": f"{_gy:.2f}%"})
+                            with st.expander(f"📊 All flat type rents in {_res_town}"):
+                                st.dataframe(_ry_pd.DataFrame(_ry_rows), hide_index=True, use_container_width=True)
+                        st.caption(
+                            f"**Source:** SRX 2024–25 town-level median for **{_rent_key}** in **{_res_town}**. "
+                            f"Range (${_rent_low:,}–${_rent_high:,}) reflects ±12% variance by floor, condition & MRT proximity. "
+                            f"Yield calculated on address median price SGD {_ref_price:,.0f}. "
+                            f"⚠️ HDB MOP (5 years) must be satisfied before entire flat can be rented."
+                        )
+                    else:
+                        st.caption(f"No rental benchmark available for {_rent_key} in {_res_town}.")
 
                     # Price + implied yield trend chart
                     st.divider()
@@ -1231,9 +1294,10 @@ elif tab_select == "🔍 Valuation":
         # Town price + yield trend
         st.divider()
         st.subheader(f"📈 {town} — Price & Rental Yield Trend ({flat_type})")
-        from collections import defaultdict
-        import pandas as pd
-        _VAL_TOWN_RENT = {
+        try:
+         from collections import defaultdict
+         import pandas as pd
+         _VAL_TOWN_RENT = {
             "ANG MO KIO": {"3 ROOM": 2300, "4 ROOM": 2800, "5 ROOM": 3200, "EXECUTIVE": 3500},
             "BEDOK": {"3 ROOM": 2200, "4 ROOM": 2700, "5 ROOM": 3100, "EXECUTIVE": 3400},
             "BISHAN": {"3 ROOM": 2400, "4 ROOM": 3000, "5 ROOM": 3400, "EXECUTIVE": 3700},
@@ -1260,72 +1324,78 @@ elif tab_select == "🔍 Valuation":
             "WOODLANDS": {"3 ROOM": 1900, "4 ROOM": 2400, "5 ROOM": 2800, "EXECUTIVE": 3100},
             "YISHUN": {"3 ROOM": 2000, "4 ROOM": 2500, "5 ROOM": 2900, "EXECUTIVE": 3200},
         }
-        _ft_key = flat_type if flat_type in ("3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE") else "4 ROOM"
-        _bench_rent = _VAL_TOWN_RENT.get(town.upper(), {}).get(_ft_key, 0)
-        town_records = [r for r in records if r['town'] == town and _ft_key.lower() in r['flat_type'].lower() and r.get('resale_price', 0) > 0]
-        if town_records:
-            monthly: dict = defaultdict(list)
-            for r in town_records:
-                monthly[r['month']].append(r['resale_price'])
-            months_sorted = sorted(monthly.keys())[-18:]
-            med_prices = [sorted(monthly[m])[len(monthly[m]) // 2] for m in months_sorted]
-            impl_yields = [round(_bench_rent * 12 / p * 100, 2) if _bench_rent and p else 0 for p in med_prices]
+         _ft_key = flat_type if flat_type in ("3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE") else "4 ROOM"
+         _bench_rent = _VAL_TOWN_RENT.get(town.upper(), {}).get(_ft_key, 0)
+         town_records = [r for r in records if r['town'] == town and _ft_key.lower() in r['flat_type'].lower() and r.get('resale_price', 0) > 0]
+         if town_records:
+             monthly: dict = defaultdict(list)
+             for r in town_records:
+                 monthly[r['month']].append(r['resale_price'])
+             months_sorted = sorted(monthly.keys())[-18:]
+             med_prices = [sorted(monthly[m])[len(monthly[m]) // 2] for m in months_sorted]
+             # Guard: only compute yields if we have valid prices
+             impl_yields = [round(_bench_rent * 12 / p * 100, 2) if _bench_rent and p and p > 0 else 0 for p in med_prices]
 
-            vt1, vt2, vt3 = st.tabs(["💰 Median Price", "🏘️ Est. Monthly Rent", "📈 Implied Gross Yield"])
-            with vt1:
-                st.line_chart(pd.DataFrame({"Median Price (SGD)": med_prices}, index=months_sorted))
-                st.caption(f"Median resale prices for {flat_type} in {town} — last {len(months_sorted)} months")
-            with vt2:
-                if _bench_rent:
-                    # Benchmark rent is static — show as flat reference line alongside price context
-                    st.metric("Benchmark Monthly Rent", f"${_bench_rent:,}/mo", help=f"SRX 2024–25 median for {_ft_key} in {town}")
-                    st.metric("Estimated Annual Rental Income", f"${_bench_rent * 12:,}")
-                    st.info(f"Rental benchmark for **{_ft_key}** in **{town}**: **${_bench_rent:,}/month**. "
-                            f"This is a town-level median from SRX 2024–25 data. "
-                            f"Actual rent varies by floor, condition, and MRT proximity. "
-                            f"Once deployed to Singapore VPS, URA rental transaction data will replace this estimate.")
-                else:
-                    st.info("No rental benchmark for this town/flat type.")
-            with vt3:
-                if _bench_rent:
-                    st.line_chart(pd.DataFrame({"Gross Yield (%)": impl_yields}, index=months_sorted))
-                    st.caption(f"Implied yield = ${_bench_rent:,}/mo benchmark ÷ monthly median price. "
-                               f"Current implied yield: **{impl_yields[-1]:.2f}%** gross / **{round(impl_yields[-1]-1.2, 2):.2f}%** net.")
-                else:
-                    st.info("No rental benchmark for this town/flat type.")
+             vt1, vt2, vt3 = st.tabs(["💰 Median Price", "🏘️ Est. Monthly Rent", "📈 Implied Gross Yield"])
+             with vt1:
+                 if med_prices:
+                     st.line_chart(pd.DataFrame({"Median Price (SGD)": med_prices}, index=months_sorted))
+                     st.caption(f"Median resale prices for {flat_type} in {town} — last {len(months_sorted)} months")
+                 else:
+                     st.info("No price data available for this town / flat type.")
+             with vt2:
+                 if _bench_rent:
+                     st.metric("Benchmark Monthly Rent", f"${_bench_rent:,}/mo", help=f"SRX 2024–25 median for {_ft_key} in {town}")
+                     st.metric("Estimated Annual Rental Income", f"${_bench_rent * 12:,}")
+                     st.info(f"Rental benchmark for **{_ft_key}** in **{town}**: **${_bench_rent:,}/month**. "
+                             f"Town-level median from SRX 2024–25. Actual rent varies by floor, condition and MRT proximity.")
+                 else:
+                     st.info("No rental benchmark for this town/flat type.")
+             with vt3:
+                 _nonzero_yields = [y for y in impl_yields if y > 0]
+                 if _bench_rent and _nonzero_yields:
+                     st.line_chart(pd.DataFrame({"Gross Yield (%)": impl_yields}, index=months_sorted))
+                     st.caption(f"Implied yield = ${_bench_rent:,}/mo ÷ monthly median price. "
+                                f"Current: **{impl_yields[-1]:.2f}%** gross / **{round(impl_yields[-1]-1.2,2):.2f}%** net.")
+                 else:
+                     st.info("No rental benchmark for this flat type — yield trend unavailable.")
+         else:
+             st.info(f"No resale transaction records for **{flat_type}** in **{town}**. Try selecting a different town or flat type.")
 
-        # ── Recent Matching Transactions ──────────────────────────────────────
-        st.divider()
-        st.subheader(f"🧾 Recent Transactions — {town} {flat_type}")
-        _recent_recs = sorted(
-            [r for r in records
-             if r.get("town","").upper() == town.upper()
-             and _ft_key.lower() in r.get("flat_type","").lower()
-             and r.get("resale_price", 0) > 0],
-            key=lambda r: r.get("month",""),
-            reverse=True
-        )[:25]
+         # ── Recent Matching Transactions ──────────────────────────────────────
+         st.divider()
+         st.subheader(f"🧾 Recent Transactions — {town} {flat_type}")
+         _recent_recs = sorted(
+             [r for r in records
+              if r.get("town","").upper() == town.upper()
+              and _ft_key.lower() in r.get("flat_type","").lower()
+              and r.get("resale_price", 0) > 0],
+             key=lambda r: r.get("month",""),
+             reverse=True
+         )[:25]
 
-        if _recent_recs:
-            import pandas as _pd_rec
-            _rec_rows = []
-            for r in _recent_recs:
-                _rec_rows.append({
-                    "Month":        r.get("month",""),
-                    "Block":        r.get("block",""),
-                    "Street":       r.get("street_name",""),
-                    "Type":         r.get("flat_type",""),
-                    "Storey":       r.get("storey_range",""),
-                    "Area (sqft)":  int(r.get("floor_area_sqft", 0)),
-                    "Price (SGD)":  f"${r.get('resale_price',0):,.0f}",
-                    "PSF":          f"${r.get('psf_sgd',0):,.0f}",
-                    "Lease Rem.":   r.get("remaining_lease",""),
-                })
-            st.dataframe(_pd_rec.DataFrame(_rec_rows), hide_index=True, use_container_width=True)
-            st.caption(f"Showing {len(_recent_recs)} most recent {flat_type} resale transactions in {town}. "
-                       f"Sorted by transaction date descending.")
-        else:
-            st.info(f"No recent transactions found for {flat_type} in {town}. Try a different flat type or town.")
+         if _recent_recs:
+             import pandas as _pd_rec
+             _rec_rows = []
+             for r in _recent_recs:
+                 _rec_rows.append({
+                     "Month":        r.get("month",""),
+                     "Block":        r.get("block",""),
+                     "Street":       r.get("street_name",""),
+                     "Type":         r.get("flat_type",""),
+                     "Storey":       r.get("storey_range",""),
+                     "Area (sqft)":  int(r.get("floor_area_sqft", 0)),
+                     "Price (SGD)":  f"${r.get('resale_price',0):,.0f}",
+                     "PSF":          f"${r.get('psf_sgd',0):,.0f}",
+                     "Lease Rem.":   r.get("remaining_lease",""),
+                 })
+             st.dataframe(_pd_rec.DataFrame(_rec_rows), hide_index=True, use_container_width=True)
+             st.caption(f"Showing {len(_recent_recs)} most recent {flat_type} transactions in {town}, sorted newest first.")
+         else:
+             st.info(f"No recent transactions found for {flat_type} in {town}.")
+
+        except Exception as _trend_err:
+            st.caption(f"ℹ️ Trend chart unavailable: {_trend_err}")
 
     elif val_type == "🏢 Private Condo/Apt":
         from data.ura_pipeline import get_district_stats
