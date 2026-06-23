@@ -496,6 +496,7 @@ with st.sidebar:
             "⏳ SSD Timer",
         ],
         "💼 My Portfolio": ["💼 Portfolio"],
+        "🎨 Marketing":   ["🎨 Marketing Studio"],
         "🤝 Partners": ["🤝 Partners"],
         "⚙️ Admin":    ["⚙️ Admin"],
     }
@@ -5385,6 +5386,245 @@ An MRTA policy ensures your family inherits the property debt-free — not the m
                     except Exception:
                         pass
                     st.success("✅ An insurance specialist will contact you within 1 business day with landlord cover options!")
+
+# ── Marketing Studio ──────────────────────────────────────────────────────────
+elif tab_select == "🎨 Marketing Studio":
+    st.header("🎨 Property Marketing Studio")
+    st.caption(
+        "Upload an interior photo — even low-quality phone shots work. "
+        "PropOS enhances it and exports a full social media pack: "
+        "PropertyGuru listing, Instagram, Facebook, WhatsApp, and a 15-second social video."
+    )
+
+    from data.marketing_pipeline import (
+        create_job, list_jobs, get_job, approve_job, reject_job,
+        get_result_files, BASE_DIR as _MKT_BASE
+    )
+    import zipfile, io as _io
+
+    # ── Worker status banner ───────────────────────────────────────────────────
+    _hb_path = _MKT_BASE / "worker_heartbeat.json"
+    if _hb_path.exists():
+        try:
+            _hb = json.loads(_hb_path.read_text())
+            _age = time.time() - _hb.get("ts", 0)
+            if _age < 120:
+                st.success(f"🟢 Mac Worker online — `{_hb.get('host','')}` · last seen {int(_age)}s ago")
+            else:
+                st.warning(f"🟡 Mac Worker last seen {int(_age/60)} min ago — start `python3 scripts/mac_worker.py` on your Mac")
+        except Exception:
+            st.warning("🔴 Mac Worker offline — start `python3 scripts/mac_worker.py` on your Mac to enable processing")
+    else:
+        st.info("💡 Start the Mac worker to enable free local processing: `python3 scripts/mac_worker.py`")
+
+    mk_tab1, mk_tab2, mk_tab3 = st.tabs(["📤 Upload New Job", "📋 Job Queue", "📥 Download Results"])
+
+    # ── Tab 1: Upload ──────────────────────────────────────────────────────────
+    with mk_tab1:
+        st.subheader("Upload Property Interior Photo")
+        _mk_col1, _mk_col2 = st.columns([2, 1])
+        with _mk_col1:
+            _mk_file = st.file_uploader(
+                "Interior photo (JPG / PNG / WEBP)",
+                type=["jpg", "jpeg", "png", "webp"],
+                key="mk_upload",
+                help="Even blurry, dark or small phone shots work — the pipeline upscales and enhances first."
+            )
+        with _mk_col2:
+            _mk_ptype = st.selectbox("Property Type",
+                ["Condo", "HDB 3-room", "HDB 4-room", "HDB 5-room", "HDB Executive", "Landed"],
+                key="mk_ptype")
+            _mk_style = st.selectbox("Marketing Style",
+                ["modern", "scandinavian", "luxury", "japandi", "airbnb"],
+                format_func=lambda s: {
+                    "modern":       "🏙️ Modern Minimalist",
+                    "scandinavian": "🌿 Scandinavian Warm",
+                    "luxury":       "💎 Luxury High-End",
+                    "japandi":      "🎋 Japandi / Zen",
+                    "airbnb":       "🏡 Bright Airbnb",
+                }[s],
+                key="mk_style")
+            _mk_label = st.text_input("Your label (optional)",
+                placeholder="e.g. Geylang 4-room listing",
+                key="mk_label")
+
+        if _mk_file:
+            st.image(_mk_file, caption="Preview — original upload", use_container_width=True)
+
+        if st.button("📤 Submit for Enhancement", type="primary", key="mk_submit",
+                     disabled=_mk_file is None):
+            if _mk_file:
+                with st.spinner("Saving job..."):
+                    _mk_job = create_job(
+                        image_bytes=_mk_file.getvalue(),
+                        image_filename=_mk_file.name,
+                        property_type=_mk_ptype,
+                        style=_mk_style,
+                        user_label=_mk_label or _mk_file.name,
+                    )
+                st.success(f"✅ Job `{_mk_job['job_id']}` submitted!")
+                st.info(
+                    "**Next step:** You will receive a Telegram message to approve this job. "
+                    "Once approved, your Mac worker processes it automatically (free). "
+                    "Results appear in the **Download Results** tab."
+                )
+                # Send Telegram approval request
+                _mk_bot_token  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                _mk_admin_chat = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "")
+                if _mk_bot_token and _mk_admin_chat:
+                    try:
+                        import requests as _mkr
+                        _mk_msg = (
+                            f"🎨 *New Marketing Job*\n"
+                            f"ID: `{_mk_job['job_id']}`\n"
+                            f"Label: {_mk_job['user_label']}\n"
+                            f"Type: {_mk_ptype} | Style: {_mk_style}\n\n"
+                            f"Approve from Admin tab or run:\n"
+                            f"`python3 scripts/mac_worker.py` (auto-picks up approved jobs)"
+                        )
+                        _mkr.post(
+                            f"https://api.telegram.org/bot{_mk_bot_token}/sendMessage",
+                            json={"chat_id": _mk_admin_chat, "text": _mk_msg, "parse_mode": "Markdown"},
+                            timeout=8,
+                        )
+                    except Exception:
+                        pass
+
+    # ── Tab 2: Job Queue (admin approval) ─────────────────────────────────────
+    with mk_tab2:
+        st.subheader("Job Queue")
+        _mk_jobs = list_jobs()
+        if not _mk_jobs:
+            st.info("No jobs yet. Upload a photo in the Upload tab.")
+        else:
+            for _mj in _mk_jobs:
+                _mj_id     = _mj["job_id"]
+                _mj_status = _mj["status"]
+                _status_icon = {
+                    "pending":    "⏳",
+                    "approved":   "✅",
+                    "processing": "⚙️",
+                    "done":       "🎉",
+                    "rejected":   "❌",
+                    "failed":     "💥",
+                }.get(_mj_status, "❓")
+                with st.expander(
+                    f"{_status_icon} `{_mj_id}` — {_mj.get('user_label','')} "
+                    f"[{_mj.get('property_type','')} / {_mj.get('style','')}] "
+                    f"· {_mj_status.upper()}",
+                    expanded=(_mj_status == "pending")
+                ):
+                    _mj_c1, _mj_c2 = st.columns(2)
+                    with _mj_c1:
+                        if Path(_mj.get("image_path","")).exists():
+                            st.image(_mj["image_path"], caption="Original", use_container_width=True)
+                    with _mj_c2:
+                        st.write(f"**Status:** {_mj_status}")
+                        st.write(f"**Created:** {time.strftime('%d %b %H:%M', time.localtime(_mj.get('created_at',0)))}")
+                        if _mj.get("scene_analysis"):
+                            _sa = _mj["scene_analysis"]
+                            st.write(f"**Room:** {_sa.get('room_type','?')} | **Style:** {_sa.get('current_style','?')}")
+                            st.write(f"**Lighting:** {_sa.get('lighting_quality','?')} | **Clutter:** {_sa.get('clutter_level','?')}")
+                        if _mj.get("error"):
+                            st.error(f"Error: {_mj['error']}")
+                        if _mj.get("worker_host"):
+                            st.caption(f"Worker: {_mj['worker_host']}")
+
+                    if _mj_status == "pending":
+                        _app_col, _rej_col = st.columns(2)
+                        if _app_col.button("✅ Approve", key=f"approve_{_mj_id}"):
+                            approve_job(_mj_id)
+                            st.success("Approved — Mac worker will pick this up on next poll.")
+                            st.rerun()
+                        if _rej_col.button("❌ Reject",  key=f"reject_{_mj_id}"):
+                            reject_job(_mj_id)
+                            st.warning("Rejected.")
+                            st.rerun()
+
+                    if _mj_status == "done" and _mj.get("outputs"):
+                        st.write(f"**{len(_mj['outputs'])} files ready** — see Download tab")
+
+    # ── Tab 3: Download Results ────────────────────────────────────────────────
+    with mk_tab3:
+        st.subheader("Download Marketing Packs")
+        _done_jobs = list_jobs("done")
+        if not _done_jobs:
+            st.info("No completed jobs yet. Completed packs appear here automatically.")
+        else:
+            for _dj in _done_jobs:
+                _dj_id    = _dj["job_id"]
+                _dj_files = get_result_files(_dj)
+                with st.expander(
+                    f"🎉 `{_dj_id}` — {_dj.get('user_label','')} "
+                    f"({len(_dj_files)} files · {_dj.get('property_type','')} {_dj.get('style','')})",
+                    expanded=True
+                ):
+                    # Preview enhanced image
+                    _enhanced = next((f for f in _dj_files if "enhanced" in f.name), None)
+                    _original = Path(_dj.get("image_path",""))
+                    _prev_col1, _prev_col2 = st.columns(2)
+                    if _original.exists():
+                        _prev_col1.image(str(_original), caption="Original",    use_container_width=True)
+                    if _enhanced and _enhanced.exists():
+                        _prev_col2.image(str(_enhanced), caption="AI Enhanced", use_container_width=True)
+
+                    # Scene analysis card
+                    if _dj.get("scene_analysis"):
+                        _sa2 = _dj["scene_analysis"]
+                        st.info(
+                            f"🔍 **Scene:** {_sa2.get('room_type','?')} | "
+                            f"**Target:** {_dj.get('transformation_goal', _sa2.get('current_style',''))} | "
+                            f"**Quality uplift:** {_dj.get('estimated_quality_uplift','?')}"
+                        )
+
+                    # Individual file downloads
+                    st.write("**Export files:**")
+                    _dl_cols = st.columns(3)
+                    for _fi, _fpath in enumerate([f for f in _dj_files if f.suffix != ".json"]):
+                        _platform_map = {
+                            "propertyguru": "PropertyGuru",
+                            "instagram_sq": "Instagram □",
+                            "instagram_st": "Instagram ↕",
+                            "facebook":     "Facebook",
+                            "whatsapp":     "WhatsApp",
+                            "print_hq":     "Print HQ",
+                            "video":        "📹 Video",
+                        }
+                        _pfm = next((v for k, v in _platform_map.items() if k in _fpath.name), _fpath.stem)
+                        with _dl_cols[_fi % 3]:
+                            st.download_button(
+                                label=f"⬇️ {_pfm}",
+                                data=_fpath.read_bytes(),
+                                file_name=_fpath.name,
+                                mime="video/mp4" if _fpath.suffix == ".mp4" else "image/jpeg",
+                                key=f"dl_{_dj_id}_{_fpath.name}",
+                                use_container_width=True,
+                            )
+
+                    # ZIP download — all files at once
+                    st.divider()
+                    _zip_buf = _io.BytesIO()
+                    with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+                        for _f in [f for f in _dj_files if f.suffix != ".json"]:
+                            _zf.write(_f, _f.name)
+                    st.download_button(
+                        label=f"📦 Download Full Pack (ZIP — {len(_dj_files)-1} files)",
+                        data=_zip_buf.getvalue(),
+                        file_name=f"PropOS_MarketingPack_{_dj_id}.zip",
+                        mime="application/zip",
+                        key=f"zip_{_dj_id}",
+                        use_container_width=True,
+                        type="primary",
+                    )
+
+                    # Captions
+                    if _dj.get("scene_analysis", {}).get("social_captions") or _dj.get("social_captions"):
+                        _caps = _dj.get("social_captions") or _dj["scene_analysis"].get("social_captions", {})
+                        if _caps:
+                            st.divider()
+                            st.write("**AI-generated captions:**")
+                            for _plat, _cap in _caps.items():
+                                st.text_area(_plat.title(), _cap, height=80, key=f"cap_{_dj_id}_{_plat}")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 elif tab_select == "⚙️ Admin":
