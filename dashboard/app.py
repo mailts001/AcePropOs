@@ -5452,6 +5452,75 @@ elif tab_select == "🎨 Marketing Studio":
         if _mk_file:
             st.image(_mk_file, caption="Preview — original upload", use_container_width=True)
 
+            # ── AI Pre-analysis preview ────────────────────────────────────────
+            st.divider()
+            _ana_col1, _ana_col2 = st.columns([1, 1])
+            if _ana_col1.button("🔍 Analyse Photo (AI Preview)", key="mk_analyse",
+                                help="Run Claude vision to preview what will be enhanced — free before you commit"):
+                with st.spinner("Analysing photo with Claude Vision..."):
+                    import tempfile as _tmpf
+                    _tmp = _tmpf.NamedTemporaryFile(suffix=Path(_mk_file.name).suffix, delete=False)
+                    _tmp.write(_mk_file.getvalue())
+                    _tmp.flush()
+                    try:
+                        from agents.photo_intel import analyse as _ph_analyse, quick_image_check as _ph_qc
+                        _preview_plan = _ph_analyse(
+                            _tmp.name,
+                            property_type=_mk_ptype,
+                            style=_mk_style,
+                        )
+                        st.session_state["mk_preview_plan"] = _preview_plan
+                    except Exception as _pe:
+                        st.session_state["mk_preview_plan"] = {"error": str(_pe)}
+                    finally:
+                        Path(_tmp.name).unlink(missing_ok=True)
+
+            if st.session_state.get("mk_preview_plan"):
+                _pp = st.session_state["mk_preview_plan"]
+                if _pp.get("error"):
+                    st.error(f"Analysis error: {_pp['error']}")
+                else:
+                    st.success("✅ Analysis complete — review before submitting")
+                    _pp_sa = _pp.get("scene_analysis", {})
+                    _pp_qc = _pp.get("qc", {})
+
+                    # Quality flags
+                    _qc_flags = []
+                    if _pp_qc.get("is_blurry"):   _qc_flags.append(f"⚠️ Blurry (score {_pp_qc.get('blur_score',0):.0f})")
+                    if _pp_qc.get("is_dark"):      _qc_flags.append(f"🌑 Underexposed (brightness {_pp_qc.get('brightness',0):.0f}/255)")
+                    if _pp_qc.get("is_overexposed"): _qc_flags.append(f"☀️ Overexposed")
+                    if not _qc_flags:              _qc_flags.append("✅ Good exposure & sharpness")
+                    st.caption("  ·  ".join(_qc_flags) + f"  ·  Resolution: {_pp_qc.get('resolution','?')}")
+
+                    _prev_c1, _prev_c2 = st.columns(2)
+                    with _prev_c1:
+                        st.markdown("**What AI sees**")
+                        st.write(f"🛋️ **Room:** {_pp_sa.get('room_type','?')}")
+                        st.write(f"🏠 **Property:** {_pp_sa.get('estimated_property_type','?')}")
+                        st.write(f"🎨 **Current style:** {_pp_sa.get('current_style','?')}")
+                        st.write(f"💡 **Lighting:** {_pp_sa.get('lighting_quality','?')}  ·  🗂️ **Clutter:** {_pp_sa.get('clutter_level','?')}")
+                        st.write(f"📈 **Staging readiness:** {_pp_sa.get('staging_readiness',0)}/10")
+                        if _pp_sa.get("key_elements"):
+                            st.write("✨ **Key elements:** " + ", ".join(_pp_sa["key_elements"]))
+                    with _prev_c2:
+                        st.markdown("**Enhancement plan**")
+                        st.write(f"🎯 **Goal:** {_pp.get('transformation_goal','?')}")
+                        st.write(f"📊 **Expected uplift:** {_pp.get('estimated_quality_uplift','?')}")
+                        if _pp_sa.get("issues_to_fix"):
+                            st.write("🔧 **Will fix:** " + ", ".join(_pp_sa["issues_to_fix"]))
+                        if _pp_sa.get("strengths"):
+                            st.write("💪 **Will preserve:** " + ", ".join(_pp_sa["strengths"]))
+                        if _pp.get("sd_prompts"):
+                            with st.expander("🖼️ AI style prompt (what SD will do)"):
+                                for _pv, _pt in _pp["sd_prompts"].items():
+                                    st.markdown(f"**{_pv.title()}:** {_pt}")
+
+                    # AI captions preview
+                    if _pp.get("social_captions"):
+                        with st.expander("📝 AI-generated social captions preview"):
+                            for _plat, _cap in _pp["social_captions"].items():
+                                st.text_area(_plat.title(), _cap, height=70, key=f"prevcap_{_plat}")
+
         if st.button("📤 Submit for Enhancement", type="primary", key="mk_submit",
                      disabled=_mk_file is None):
             if _mk_file:
@@ -5660,6 +5729,8 @@ elif tab_select == "🎨 Marketing Studio":
             # Files are only loaded into memory when user explicitly clicks a job.
             if "mk_open_job" not in st.session_state:
                 st.session_state["mk_open_job"] = None
+            if "mk_preview_plan" not in st.session_state:
+                st.session_state["mk_preview_plan"] = None
 
             for _dj in _done_jobs:
                 _dj_id = _dj["job_id"]
@@ -5695,14 +5766,46 @@ elif tab_select == "🎨 Marketing Studio":
                     except Exception:
                         _prev_col2.caption("Enhanced preview unavailable")
 
-                    # Scene analysis
-                    if _dj.get("scene_analysis"):
-                        _sa2 = _dj["scene_analysis"]
-                        st.info(
-                            f"🔍 **Scene:** {_sa2.get('room_type','?')} | "
-                            f"**Target:** {_dj.get('transformation_goal', _sa2.get('current_style',''))} | "
-                            f"**Quality uplift:** {_dj.get('estimated_quality_uplift','?')}"
-                        )
+                    # Enhancement explanation expander
+                    _dj_sa = _dj.get("scene_analysis", {})
+                    with st.expander("🔍 What was enhanced — AI analysis report", expanded=False):
+                        if _dj_sa or _dj.get("transformation_goal"):
+                            _exp_c1, _exp_c2 = st.columns(2)
+                            with _exp_c1:
+                                st.markdown("**Scene detected**")
+                                st.write(f"🛋️ Room: **{_dj_sa.get('room_type','?')}**")
+                                st.write(f"🏠 Property: **{_dj_sa.get('estimated_property_type','?')}**")
+                                st.write(f"🎨 Original style: **{_dj_sa.get('current_style','?')}**")
+                                st.write(f"💡 Lighting: **{_dj_sa.get('lighting_quality','?')}**")
+                                st.write(f"🗂️ Clutter: **{_dj_sa.get('clutter_level','?')}**")
+                                st.write(f"📈 Staging readiness: **{_dj_sa.get('staging_readiness','?')}/10**")
+                                if _dj_sa.get("key_elements"):
+                                    st.write("✨ Key elements: " + ", ".join(_dj_sa["key_elements"]))
+                            with _exp_c2:
+                                st.markdown("**Enhancements applied**")
+                                if _dj.get("transformation_goal"):
+                                    st.write(f"🎯 Goal: *{_dj['transformation_goal']}*")
+                                if _dj.get("estimated_quality_uplift"):
+                                    st.write(f"📊 Quality uplift: **{_dj['estimated_quality_uplift']}**")
+                                if _dj_sa.get("issues_to_fix"):
+                                    st.write("🔧 Fixed: " + ", ".join(_dj_sa["issues_to_fix"]))
+                                if _dj_sa.get("strengths"):
+                                    st.write("💪 Preserved: " + ", ".join(_dj_sa["strengths"]))
+                                _mf_path = next((f for f in _dj_files if f.name == "manifest.json"), None)
+                                if _mf_path and _mf_path.exists():
+                                    try:
+                                        _mf = json.loads(_mf_path.read_text())
+                                        st.write("🛠️ Pipeline: " + " → ".join(_mf.get("log", [])))
+                                        if _mf.get("capabilities"):
+                                            _caps_used = [k for k, v in _mf["capabilities"].items() if v]
+                                            st.caption("Tools available: " + ", ".join(_caps_used))
+                                    except Exception:
+                                        pass
+                            if _dj.get("sd_prompts"):
+                                st.markdown("**Style prompt used**")
+                                st.caption(_dj["sd_prompts"].get("moderate", "Pillow enhancement (no SD)"))
+                        else:
+                            st.caption("No AI analysis data — job was processed with Pillow fallback only.")
 
                     # Individual platform downloads — loaded on demand only
                     st.write("**Export files:**")

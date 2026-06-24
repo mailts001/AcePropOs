@@ -202,7 +202,7 @@ def process_job(job: dict, dry_run: bool = False) -> bool:
     # ── 5. Upload results to VPS ──────────────────────────────────────────────
     remote_result_dir = f"{VPS_PATH}/cache/marketing/results/{job_id}"
     _ssh(f"mkdir -p {remote_result_dir}")
-    if not _scp_put(local_result_dir + "/", remote_result_dir + "/"):
+    if not _scp_put(local_result_dir, remote_result_dir + "/"):
         print(f"[Worker] WARNING: upload may be incomplete")
 
     # ── 6. Mark done on VPS ──────────────────────────────────────────────────
@@ -214,6 +214,21 @@ def process_job(job: dict, dry_run: bool = False) -> bool:
         f"mark_done('{job_id}', json.loads('{outputs_json}'))\""
     )
 
+    # Sync the updated done-job JSON back to Mac so dashboard can see it
+    mac_jobs_done = Path(__file__).parent.parent / "cache" / "marketing" / "jobs" / "done"
+    mac_jobs_done.mkdir(parents=True, exist_ok=True)
+    local_job_json = mac_jobs_done / f"{job_id}.json"
+    _scp_get(
+        f"{VPS_PATH}/cache/marketing/jobs/done/{job_id}.json",
+        str(local_job_json),
+    )
+    # Patch result_dir to Mac-local path so dashboard's get_result_files() works
+    if local_job_json.exists():
+        _jdata = json.loads(local_job_json.read_text())
+        mac_result_path = Path(__file__).parent.parent / "cache" / "marketing" / "results" / job_id
+        _jdata["result_dir"] = str(mac_result_path)
+        local_job_json.write_text(json.dumps(_jdata, indent=2))
+
     # ── 7. Notify via Telegram ────────────────────────────────────────────────
     n_files = len([o for o in manifest.get("outputs", []) if not o.get("error")])
     _tg(
@@ -224,8 +239,15 @@ def process_job(job: dict, dry_run: bool = False) -> bool:
         f"Download from PropOS dashboard → Marketing Studio"
     )
 
-    # ── 8. Clean up local temp files ─────────────────────────────────────────
+    # ── 8. Copy results to Mac cache so dashboard can serve them ─────────────
     import shutil
+    mac_result_dir = Path(__file__).parent.parent / "cache" / "marketing" / "results" / job_id
+    mac_result_dir.mkdir(parents=True, exist_ok=True)
+    for _f in Path(local_result_dir).glob("*.*"):
+        shutil.copy2(str(_f), str(mac_result_dir / _f.name))
+    print(f"[Worker] 📁 Results copied to {mac_result_dir}")
+
+    # ── 9. Clean up temp working dir ─────────────────────────────────────────
     shutil.rmtree(local_result_dir, ignore_errors=True)
     Path(local_img).unlink(missing_ok=True)
     print(f"[Worker] ✅ Job {job_id} complete — {n_files} files uploaded")
